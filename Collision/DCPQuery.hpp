@@ -91,7 +91,7 @@ template <typename Vector>
 double DistPointSeg(const Vector &point, const Vector &minus, const Vector &plus, Vector &pointPerp) {
     ResultP3S3<Vector> result;
 
-    // The direction vector is not unit length.  The normalization is deferred
+    // The direction vector is not a unit length.  The normalization is deferred
     // until it is needed.
     Vector direction = plus - minus;
     Vector diff = point - plus;

@@ -1,7 +1,7 @@
 /**
- * @file SylinderSystem_main.cpp
+ * @file ParticleSystem_main.cpp
  * @author Wen Yan (wenyan4work@gmail.com)
- * @brief main driver of SylinderSystem class
+ * @brief main driver of ParticleSystem class
  * @version 0.1
  * @date 2021-02-24
  *
@@ -11,7 +11,7 @@
 
 #include <mpi.h>
 
-#include "SylinderSystem.hpp"
+#include "ParticleSystem.hpp"
 #include "Util/Logger.hpp"
 
 int main(int argc, char **argv) {
@@ -22,9 +22,10 @@ int main(int argc, char **argv) {
         // create a system and distribute it to all ranks
         // MPI is initialized inside PS::Initialize()
         std::string runConfig = "RunConfig.yaml";
-        std::string posFile = "SylinderInitial.dat";
+        std::string posFile = "ParticleInitial.dat";
         std::string restartFile = "TimeStepInfo.txt";
-        SylinderSystem system;
+        constexpr int spectralDegree = 6;
+        ParticleSystem<spectralDegree> system;
 
         if (IOHelper::fileExist(restartFile)) {
             system.reinitialize(runConfig, restartFile, argc, argv, true);

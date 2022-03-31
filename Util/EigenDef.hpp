@@ -19,6 +19,7 @@
 #include <Eigen/Cholesky>
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
+#include <complex>
 
 /*
  * Do not use auto with Eigen
@@ -34,6 +35,7 @@ using Evec2 = Eigen::Matrix<double, 2, 1, Eigen::DontAlign>;
 using Evec3 = Eigen::Matrix<double, 3, 1, Eigen::DontAlign>;
 using Evec4 = Eigen::Matrix<double, 4, 1, Eigen::DontAlign>;
 using Evec6 = Eigen::Matrix<double, 6, 1, Eigen::DontAlign>;
+using Evec3cd = Eigen::Matrix<std::complex<double>, 3, 1, Eigen::DontAlign>;
 
 // unaligned fixed size matrices
 using Emat2 = Eigen::Matrix<double, 2, 2, Eigen::DontAlign>;

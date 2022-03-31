@@ -1,4 +1,4 @@
-#include "SylinderSystem.hpp"
+#include "ParticleSystem.hpp"
 
 #include "MPI/CommMPI.hpp"
 #include "Util/EquatnHelper.hpp"
@@ -24,15 +24,18 @@
 #include <mpi.h>
 #include <omp.h>
 
-SylinderSystem::SylinderSystem(const std::string &configFile, const std::string &posFile, int argc, char **argv) {
-    initialize(SylinderConfig(configFile), posFile, argc, argv);
+template <int spectralDegree>
+ParticleSystem<spectralDegree>::ParticleSystem(const std::string &configFile, const std::string &posFile, int argc, char **argv) {
+    initialize(ParticleConfig(configFile), posFile, argc, argv);
 }
 
-SylinderSystem::SylinderSystem(const SylinderConfig &runConfig_, const std::string &posFile, int argc, char **argv) {
+template <int spectralDegree>
+ParticleSystem<spectralDegree>::ParticleSystem(const ParticleConfig &runConfig_, const std::string &posFile, int argc, char **argv) {
     initialize(runConfig_, posFile, argc, argv);
 }
 
-void SylinderSystem::initialize(const SylinderConfig &runConfig_, const std::string &posFile, int argc, char **argv) {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::initialize(const ParticleConfig &runConfig_, const std::string &posFile, int argc, char **argv) {
     runConfig = runConfig_;
     stepCount = 0;
     snapID = 0; // the first snapshot starts from 0 in writeResult
@@ -58,8 +61,8 @@ void SylinderSystem::initialize(const SylinderConfig &runConfig_, const std::str
     dinfo.initialize(); // init DomainInfo
     setDomainInfo();
 
-    sylinderContainer.initialize();
-    sylinderContainer.setAverageTargetNumberOfSampleParticlePerProcess(200); // more sample for better balance
+    particleContainer.initialize();
+    particleContainer.setAverageTargetNumberOfSampleParticlePerProcess(200); // more sample for better balance
 
     if (IOHelper::fileExist(posFile)) {
         setInitialFromFile(posFile);
@@ -68,15 +71,15 @@ void SylinderSystem::initialize(const SylinderConfig &runConfig_, const std::str
     }
     setLinkMapFromFile(posFile);
 
-    // at this point all sylinders located on rank 0
+    // at this point all particles located on rank 0
     commRcp->barrier();
     decomposeDomain();
-    exchangeSylinder(); // distribute to ranks, initial domain decomposition
+    exchangeParticle(); // distribute to ranks, initial domain decomposition
 
-    sylinderNearDataDirectoryPtr = std::make_shared<ZDD<SylinderNearEP>>(sylinderContainer.getNumberOfParticleLocal());
+    particleNearDataDirectoryPtr = std::make_shared<ZDD<ParticleNearEP>>(particleContainer.getNumberOfParticleLocal());
 
-    treeSylinderNumber = 0;
-    setTreeSylinder();
+    treeParticleNumber = 0;
+    setTreeParticle();
 
     calcVolFrac();
 
@@ -85,7 +88,7 @@ void SylinderSystem::initialize(const SylinderConfig &runConfig_, const std::str
         writeBox();
     }
 
-    if (!runConfig.sylinderFixed) {
+    if (!runConfig.particleFixed) {
         // 100 NON-B steps to resolve initial configuration collisions
         // no output
         spdlog::warn("Initial Collision Resolution Begin");
@@ -100,10 +103,11 @@ void SylinderSystem::initialize(const SylinderConfig &runConfig_, const std::str
         spdlog::warn("Initial Collision Resolution End");
     }
 
-    spdlog::warn("SylinderSystem Initialized. {} local sylinders", sylinderContainer.getNumberOfParticleLocal());
+    spdlog::warn("ParticleSystem Initialized. {} local particles", particleContainer.getNumberOfParticleLocal());
 }
 
-void SylinderSystem::reinitialize(const SylinderConfig &runConfig_, const std::string &restartFile, int argc,
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::reinitialize(const ParticleConfig &runConfig_, const std::string &restartFile, int argc,
                                   char **argv, bool eulerStep) {
     runConfig = runConfig_;
 
@@ -137,8 +141,8 @@ void SylinderSystem::reinitialize(const SylinderConfig &runConfig_, const std::s
     dinfo.initialize(); // init DomainInfo
     setDomainInfo();
 
-    sylinderContainer.initialize();
-    sylinderContainer.setAverageTargetNumberOfSampleParticlePerProcess(200); // more samples for better balance
+    particleContainer.initialize();
+    particleContainer.setAverageTargetNumberOfSampleParticlePerProcess(200); // more samples for better balance
 
     std::string asciiFileName = pvtpFileName;
     auto pos = asciiFileName.find_last_of('.');
@@ -158,36 +162,38 @@ void SylinderSystem::reinitialize(const SylinderConfig &runConfig_, const std::s
     stepCount++;
     snapID++;
 
-    // at this point all sylinders located on rank 0
+    // at this point all particles located on rank 0
     commRcp->barrier();
     applyBoxBC();
     decomposeDomain();
-    exchangeSylinder(); // distribute to ranks, initial domain decomposition
-    updateSylinderMap();
+    exchangeParticle(); // distribute to ranks, initial domain decomposition
+    updateParticleMap();
 
-    sylinderNearDataDirectoryPtr = std::make_shared<ZDD<SylinderNearEP>>(sylinderContainer.getNumberOfParticleLocal());
+    particleNearDataDirectoryPtr = std::make_shared<ZDD<ParticleNearEP>>(particleContainer.getNumberOfParticleLocal());
 
-    treeSylinderNumber = 0;
-    setTreeSylinder();
+    treeParticleNumber = 0;
+    setTreeParticle();
     calcVolFrac();
 
-    spdlog::warn("SylinderSystem Initialized. {} local sylinders", sylinderContainer.getNumberOfParticleLocal());
+    spdlog::warn("ParticleSystem Initialized. {} local particles", particleContainer.getNumberOfParticleLocal());
 }
 
-void SylinderSystem::setTreeSylinder() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::setTreeParticle() {
     // initialize tree
     // always keep tree max_glb_num_ptcl to be twice the global actual particle number.
-    const int nGlobal = sylinderContainer.getNumberOfParticleGlobal();
-    if (nGlobal > 1.5 * treeSylinderNumber || !treeSylinderNearPtr) {
+    const int nGlobal = particleContainer.getNumberOfParticleGlobal();
+    if (nGlobal > 1.5 * treeParticleNumber || !treeParticleNearPtr) {
         // a new larger tree
-        treeSylinderNearPtr.reset();
-        treeSylinderNearPtr = std::make_unique<TreeSylinderNear>();
-        treeSylinderNearPtr->initialize(2 * nGlobal);
-        treeSylinderNumber = nGlobal;
+        treeParticleNearPtr.reset();
+        treeParticleNearPtr = std::make_unique<TreeParticleNear>();
+        treeParticleNearPtr->initialize(2 * nGlobal);
+        treeParticleNumber = nGlobal;
     }
 }
 
-void SylinderSystem::getOrient(Equatn &orient, const double px, const double py, const double pz, const int threadId) {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::getOrient(Equatn &orient, const double px, const double py, const double pz, const int threadId) {
     Evec3 pvec;
     if (px < -1 || px > 1) {
         pvec[0] = 2 * rngPoolPtr->getU01(threadId) - 1;
@@ -215,36 +221,38 @@ void SylinderSystem::getOrient(Equatn &orient, const double px, const double py,
     }
 }
 
-void SylinderSystem::setInitialFromConfig() {
-    // this function init all sylinders on rank 0
-    if (runConfig.sylinderLengthSigma > 0) {
-        rngPoolPtr->setLogNormalParameters(runConfig.sylinderLength, runConfig.sylinderLengthSigma);
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::setInitialFromConfig() {
+    // this function init all particles on rank 0
+    if (runConfig.particleLengthSigma > 0) {
+        rngPoolPtr->setLogNormalParameters(runConfig.particleLength, runConfig.particleLengthSigma);
     }
 
     if (commRcp->getRank() != 0) {
-        sylinderContainer.setNumberOfParticleLocal(0);
+        particleContainer.setNumberOfParticleLocal(0);
     } else {
         const double boxEdge[3] = {runConfig.initBoxHigh[0] - runConfig.initBoxLow[0],
                                    runConfig.initBoxHigh[1] - runConfig.initBoxLow[1],
                                    runConfig.initBoxHigh[2] - runConfig.initBoxLow[2]};
         const double minBoxEdge = std::min(std::min(boxEdge[0], boxEdge[1]), boxEdge[2]);
         const double maxLength = minBoxEdge * 0.5;
-        const double radius = runConfig.sylinderDiameter / 2;
-        const int nSylinderLocal = runConfig.sylinderNumber;
-        sylinderContainer.setNumberOfParticleLocal(nSylinderLocal);
+        const double radius = runConfig.particleDiameter / 2;
+        const int nParticleLocal = runConfig.particleNumber;
+        particleContainer.setNumberOfParticleLocal(nParticleLocal);
 
 #pragma omp parallel
         {
             const int threadId = omp_get_thread_num();
 #pragma omp for
-            for (int i = 0; i < nSylinderLocal; i++) {
+            for (int i = 0; i < nParticleLocal; i++) {
+                // initailize the particle
                 double length;
-                if (runConfig.sylinderLengthSigma > 0) {
+                if (runConfig.particleLengthSigma > 0) {
                     do { // generate random length
                         length = rngPoolPtr->getLN(threadId);
                     } while (length >= maxLength);
                 } else {
-                    length = runConfig.sylinderLength;
+                    length = runConfig.particleLength;
                 }
                 double pos[3];
                 for (int k = 0; k < 3; k++) {
@@ -254,8 +262,14 @@ void SylinderSystem::setInitialFromConfig() {
                 getOrient(orientq, runConfig.initOrient[0], runConfig.initOrient[1], runConfig.initOrient[2], threadId);
                 double orientation[4];
                 Emapq(orientation).coeffs() = orientq.coeffs();
-                sylinderContainer[i] = Sylinder(i, radius, radius, length, length, pos, orientation);
-                sylinderContainer[i].clear();
+                particleContainer[i] = Particle(i, radius, radius, length, length, pos, orientation);
+
+                // initialize the particle's surface
+                // TODO: modify to support multiple particle types
+                const Evec3 north = {0.0, 0.0, 1.0};
+                sharedPS = SharedParticleSurface("fine", runConfig.particleShapesPtr, north, runConfig.prescribedSurfaceDensityFile);
+                particleContainer[i].storeSharedSurface(&sharedPS);
+                particleContainer[i].clear();
             }
         }
     }
@@ -265,8 +279,9 @@ void SylinderSystem::setInitialFromConfig() {
     }
 }
 
-void SylinderSystem::setInitialCircularCrossSection() {
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::setInitialCircularCrossSection() {
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
     double radiusCrossSec = 0;            // x, y, z, axis radius
     Evec3 centerCrossSec = Evec3::Zero(); // x, y, z, axis center.
     // x axis
@@ -279,24 +294,25 @@ void SylinderSystem::setInitialCircularCrossSection() {
         const int threadId = omp_get_thread_num();
 #pragma omp for
         for (int i = 0; i < nLocal; i++) {
-            double y = sylinderContainer[i].pos[1];
-            double z = sylinderContainer[i].pos[2];
+            double y = particleContainer[i].pos[1];
+            double z = particleContainer[i].pos[2];
             // replace y,z with position in the circle
             getRandPointInCircle(radiusCrossSec, rngPoolPtr->getU01(threadId), rngPoolPtr->getU01(threadId), y, z);
-            sylinderContainer[i].pos[1] = y + centerCrossSec[1];
-            sylinderContainer[i].pos[2] = z + centerCrossSec[2];
+            particleContainer[i].pos[1] = y + centerCrossSec[1];
+            particleContainer[i].pos[2] = z + centerCrossSec[2];
         }
     }
 }
 
-void SylinderSystem::calcVolFrac() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::calcVolFrac() {
     // calc volume fraction of sphero cylinders
     // step 1, calc local total volume
     double volLocal = 0;
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
 #pragma omp parallel for reduction(+ : volLocal)
     for (int i = 0; i < nLocal; i++) {
-        auto &sy = sylinderContainer[i];
+        auto &sy = particleContainer[i];
         volLocal += 3.1415926535 * (0.25 * sy.length * pow(sy.radius * 2, 2) + pow(sy.radius * 2, 3) / 6);
     }
     double volGlobal = 0;
@@ -307,14 +323,15 @@ void SylinderSystem::calcVolFrac() {
     double boxVolume = (runConfig.simBoxHigh[0] - runConfig.simBoxLow[0]) *
                        (runConfig.simBoxHigh[1] - runConfig.simBoxLow[1]) *
                        (runConfig.simBoxHigh[2] - runConfig.simBoxLow[2]);
-    spdlog::warn("Volume Sylinder = {:g}", volGlobal);
+    spdlog::warn("Volume Particle = {:g}", volGlobal);
     spdlog::warn("Volume fraction = {:g}", volGlobal / boxVolume);
 }
 
-void SylinderSystem::setInitialFromFile(const std::string &filename) {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::setInitialFromFile(const std::string &filename) {
     spdlog::warn("Reading file " + filename);
 
-    auto parseSylinder = [&](Sylinder &sy, const std::string &line) {
+    auto parseParticle = [&](Particle &sy, const std::string &line) {
         std::stringstream liness(line);
         // required data
         int gid;
@@ -344,37 +361,38 @@ void SylinderSystem::setInitialFromFile(const std::string &filename) {
     };
 
     if (commRcp->getRank() != 0) {
-        sylinderContainer.setNumberOfParticleLocal(0);
+        particleContainer.setNumberOfParticleLocal(0);
     } else {
         std::ifstream myfile(filename);
         std::string line;
         std::getline(myfile, line); // read two header lines
         std::getline(myfile, line);
 
-        std::deque<Sylinder> sylinderReadFromFile;
+        std::deque<Particle> particleReadFromFile;
         while (std::getline(myfile, line)) {
             if (line[0] == 'C' || line[0] == 'S') {
-                Sylinder sy;
-                parseSylinder(sy, line);
-                sylinderReadFromFile.push_back(sy);
+                Particle sy;
+                parseParticle(sy, line);
+                particleReadFromFile.push_back(sy);
             }
         }
         myfile.close();
 
-        spdlog::debug("Sylinder number in file {} ", sylinderReadFromFile.size());
+        spdlog::debug("Particle number in file {} ", particleReadFromFile.size());
 
         // set on rank 0
-        const int nRead = sylinderReadFromFile.size();
-        sylinderContainer.setNumberOfParticleLocal(nRead);
+        const int nRead = particleReadFromFile.size();
+        particleContainer.setNumberOfParticleLocal(nRead);
 #pragma omp parallel for
         for (int i = 0; i < nRead; i++) {
-            sylinderContainer[i] = sylinderReadFromFile[i];
-            sylinderContainer[i].clear();
+            particleContainer[i] = particleReadFromFile[i];
+            particleContainer[i].clear();
         }
     }
 }
 
-void SylinderSystem::setLinkMapFromFile(const std::string &filename) {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::setLinkMapFromFile(const std::string &filename) {
     spdlog::warn("Reading file " + filename);
 
     auto parseLink = [&](Link &link, const std::string &line) {
@@ -403,11 +421,12 @@ void SylinderSystem::setLinkMapFromFile(const std::string &filename) {
     spdlog::debug("Link number in file {} ", linkMap.size());
 }
 
-void SylinderSystem::setInitialFromVTKFile(const std::string &pvtpFileName) {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::setInitialFromVTKFile(const std::string &pvtpFileName) {
     spdlog::warn("Reading file " + pvtpFileName);
 
     if (commRcp->getRank() != 0) {
-        sylinderContainer.setNumberOfParticleLocal(0);
+        particleContainer.setNumberOfParticleLocal(0);
     } else {
 
         // Read the pvtp file and automatically merge the vtks files into a single polydata
@@ -437,13 +456,13 @@ void SylinderSystem::setInitialFromVTKFile(const std::string &pvtpFileName) {
         vtkSmartPointer<vtkDataArray> velData = polydata->GetCellData()->GetArray("vel");
         vtkSmartPointer<vtkDataArray> omegaData = polydata->GetCellData()->GetArray("omega");
 
-        const int sylinderNumberInFile = posData->GetNumberOfPoints() / 2; // two points per sylinder
-        sylinderContainer.setNumberOfParticleLocal(sylinderNumberInFile);
-        spdlog::debug("Sylinder number in file {} ", sylinderNumberInFile);
+        const int particleNumberInFile = posData->GetNumberOfPoints() / 2; // two points per particle
+        particleContainer.setNumberOfParticleLocal(particleNumberInFile);
+        spdlog::debug("Particle number in file {} ", particleNumberInFile);
 
 #pragma omp parallel for
-        for (int i = 0; i < sylinderNumberInFile; i++) {
-            auto &sy = sylinderContainer[i];
+        for (int i = 0; i < particleNumberInFile; i++) {
+            auto &sy = particleContainer[i];
             double leftEndpointPos[3] = {0, 0, 0};
             double rightEndpointPos[3] = {0, 0, 0};
             posData->GetPoint(i * 2, leftEndpointPos);
@@ -468,16 +487,18 @@ void SylinderSystem::setInitialFromVTKFile(const std::string &pvtpFileName) {
             sy.omega[2] = omegaData->GetComponent(i, 2);
         }
 
-        // sort the vector of Sylinders by gid ascending;
-        // std::sort(sylinderReadFromFile.begin(), sylinderReadFromFile.end(),
-        //           [](const Sylinder &t1, const Sylinder &t2) { return t1.gid < t2.gid; });
+        // sort the vector of Particles by gid ascending;
+        // std::sort(particleReadFromFile.begin(), particleReadFromFile.end(),
+        //           [](const Particle &t1, const Particle &t2) { return t1.gid < t2.gid; });
     }
     commRcp->barrier();
 }
 
-std::string SylinderSystem::getCurrentResultFolder() { return getResultFolderWithID(this->snapID); }
+template <int spectralDegree>
+std::string ParticleSystem<spectralDegree>::getCurrentResultFolder() { return getResultFolderWithID(this->snapID); }
 
-std::string SylinderSystem::getResultFolderWithID(int snapID_) {
+template <int spectralDegree>
+std::string ParticleSystem<spectralDegree>::getResultFolderWithID(int snapID_) {
     const int num = std::max(400 / commRcp->getSize(), 1); // limit max number of files per folder
     int k = snapID_ / num;
     int low = k * num, high = k * num + num - 1;
@@ -486,15 +507,16 @@ std::string SylinderSystem::getResultFolderWithID(int snapID_) {
     return baseFolder;
 }
 
-void SylinderSystem::writeAscii(const std::string &baseFolder) {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::writeAscii(const std::string &baseFolder) {
     // write a single ascii .dat file
-    const int nGlobal = sylinderContainer.getNumberOfParticleGlobal();
+    const int nGlobal = particleContainer.getNumberOfParticleGlobal();
 
-    std::string name = baseFolder + std::string("SylinderAscii_") + std::to_string(snapID) + ".dat";
-    SylinderAsciiHeader header;
+    std::string name = baseFolder + std::string("ParticleAscii_") + std::to_string(snapID) + ".dat";
+    ParticleAsciiHeader header;
     header.nparticle = nGlobal;
     header.time = stepCount * runConfig.dt;
-    sylinderContainer.writeParticleAscii(name.c_str(), header);
+    particleContainer.writeParticleAscii(name.c_str(), header);
     if (commRcp->getRank() == 0) {
         FILE *fptr = fopen(name.c_str(), "a");
         for (const auto &key_value : linkMap) {
@@ -505,11 +527,12 @@ void SylinderSystem::writeAscii(const std::string &baseFolder) {
     commRcp->barrier();
 }
 
-void SylinderSystem::writeTimeStepInfo(const std::string &baseFolder) {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::writeTimeStepInfo(const std::string &baseFolder) {
     if (commRcp->getRank() == 0) {
         // write a single txt file containing timestep and most recent pvtp file names
         std::string name = baseFolder + std::string("../../TimeStepInfo.txt");
-        std::string pvtpFileName = std::string("Sylinder_") + std::to_string(snapID) + std::string(".pvtp");
+        std::string pvtpFileName = std::string("Particle_") + std::to_string(snapID) + std::string(".pvtp");
 
         FILE *restartFile = fopen(name.c_str(), "w");
         fprintf(restartFile, "%u\n", restartRngSeed);
@@ -520,19 +543,22 @@ void SylinderSystem::writeTimeStepInfo(const std::string &baseFolder) {
     }
 }
 
-void SylinderSystem::writeVTK(const std::string &baseFolder) {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::writeVTK(const std::string &baseFolder) {
     const int rank = commRcp->getRank();
     const int size = commRcp->getSize();
-    Sylinder::writeVTP<PS::ParticleSystem<Sylinder>>(sylinderContainer, sylinderContainer.getNumberOfParticleLocal(),
-                                                     baseFolder, std::to_string(snapID), rank);
+    Particle<spectralDegree>::template writeVTP<PS::ParticleSystem<Particle<spectralDegree>>>(
+        particleContainer, particleContainer.getNumberOfParticleLocal(),
+        baseFolder, std::to_string(snapID), rank);
     conCollectorPtr->writeVTP(baseFolder, "", std::to_string(snapID), rank);
     if (rank == 0) {
-        Sylinder::writePVTP(baseFolder, std::to_string(snapID), size); // write parallel head
+        Particle::writePVTP(baseFolder, std::to_string(snapID), size); // write parallel head
         conCollectorPtr->writePVTP(baseFolder, "", std::to_string(snapID), size);
     }
 }
 
-void SylinderSystem::writeBox() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::writeBox() {
     FILE *boxFile = fopen("./result/simBox.vtk", "w");
     fprintf(boxFile, "# vtk DataFile Version 3.0\n");
     fprintf(boxFile, "vtk file\n");
@@ -550,7 +576,8 @@ void SylinderSystem::writeBox() {
     fclose(boxFile);
 }
 
-void SylinderSystem::writeResult() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::writeResult() {
     std::string baseFolder = getCurrentResultFolder();
     IOHelper::makeSubFolder(baseFolder);
     writeAscii(baseFolder);
@@ -559,14 +586,16 @@ void SylinderSystem::writeResult() {
     snapID++;
 }
 
-void SylinderSystem::showOnScreenRank0() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::showOnScreenRank0() {
     if (commRcp->getRank() == 0) {
-        printf("-----------SylinderSystem Settings-----------\n");
+        printf("-----------ParticleSystem Settings-----------\n");
         runConfig.dump();
     }
 }
 
-void SylinderSystem::setDomainInfo() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::setDomainInfo() {
     const int pbcX = (runConfig.simBoxPBC[0] ? 1 : 0);
     const int pbcY = (runConfig.simBoxPBC[1] ? 1 : 0);
     const int pbcZ = (runConfig.simBoxPBC[2] ? 1 : 0);
@@ -609,17 +638,20 @@ void SylinderSystem::setDomainInfo() {
     dinfo.setPosRootDomain(rootDomainLow, rootDomainHigh); // rootdomain must be specified after PBC
 }
 
-void SylinderSystem::decomposeDomain() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::decomposeDomain() {
     applyBoxBC();
-    dinfo.decomposeDomainAll(sylinderContainer);
+    dinfo.decomposeDomainAll(particleContainer);
 }
 
-void SylinderSystem::exchangeSylinder() {
-    sylinderContainer.exchangeParticle(dinfo);
-    updateSylinderRank();
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::exchangeParticle() {
+    particleContainer.exchangeParticle(dinfo);
+    updateParticleRank();
 }
 
-void SylinderSystem::calcMobMatrix() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::calcMobMatrix() {
     // diagonal hydro mobility operator
     // 3*3 block for translational + 3*3 block for rotational.
     // 3 nnz per row, 18 nnz per tubule
@@ -627,8 +659,8 @@ void SylinderSystem::calcMobMatrix() {
     const double Pi = 3.14159265358979323846;
     const double mu = runConfig.viscosity;
 
-    const int nLocal = sylinderMapRcp->getNodeNumElements();
-    TEUCHOS_ASSERT(nLocal == sylinderContainer.getNumberOfParticleLocal());
+    const int nLocal = particleMapRcp->getNodeNumElements();
+    TEUCHOS_ASSERT(nLocal == particleContainer.getNumberOfParticleLocal());
     const int localSize = nLocal * 6; // local row number
 
     Kokkos::View<size_t *> rowPointers("rowPointers", localSize + 1);
@@ -641,7 +673,7 @@ void SylinderSystem::calcMobMatrix() {
 
 #pragma omp parallel for
     for (int i = 0; i < nLocal; i++) {
-        const auto &sy = sylinderContainer[i];
+        const auto &sy = particleContainer[i];
 
         // calculate the Mob Trans and MobRot
         Emat3 MobTrans; //            double MobTrans[3][3];
@@ -710,24 +742,26 @@ void SylinderSystem::calcMobMatrix() {
 
     // mobMat is block-diagonal, so domainMap=rangeMap
     mobilityMatrixRcp =
-        Teuchos::rcp(new TCMAT(sylinderMobilityMapRcp, sylinderMobilityMapRcp, rowPointers, columnIndices, values));
-    mobilityMatrixRcp->fillComplete(sylinderMobilityMapRcp, sylinderMobilityMapRcp); // domainMap, rangeMap
+        Teuchos::rcp(new TCMAT(particleMobilityMapRcp, particleMobilityMapRcp, rowPointers, columnIndices, values));
+    mobilityMatrixRcp->fillComplete(particleMobilityMapRcp, particleMobilityMapRcp); // domainMap, rangeMap
 
     spdlog::debug("MobMat Constructed " + mobilityMatrixRcp->description());
 }
 
-void SylinderSystem::calcMobOperator() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::calcMobOperator() {
     calcMobMatrix();
     mobilityOperatorRcp = mobilityMatrixRcp;
 }
 
-void SylinderSystem::calcVelocityNonCon() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::calcVelocityNonCon() {
     // velocityNonCon = velocityBrown + velocityPartNonBrown + mobility * forcePartNonBrown
     // if monolayer, set velBrownZ =0, velPartNonBrownZ =0, forcePartNonBrownZ =0
-    velocityNonConRcp = Teuchos::rcp<TV>(new TV(sylinderMobilityMapRcp, true)); // allocate and zero out
+    velocityNonConRcp = Teuchos::rcp<TV>(new TV(particleMobilityMapRcp, true)); // allocate and zero out
     auto velNCPtr = velocityNonConRcp->getLocalView<Kokkos::HostSpace>();
 
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
     TEUCHOS_ASSERT(nLocal * 6 == velocityNonConRcp->getLocalLength());
 
     if (!forcePartNonBrownRcp.is_null()) {
@@ -742,11 +776,11 @@ void SylinderSystem::calcVelocityNonCon() {
                 velNCPtr(6 * i + 4, 0) = 0; // omegay
             }
         }
-        // write back to Sylinder members
+        // write back to Particle members
         auto forcePtr = forcePartNonBrownRcp->getLocalView<Kokkos::HostSpace>();
 #pragma omp parallel for
         for (int i = 0; i < nLocal; i++) {
-            auto &sy = sylinderContainer[i];
+            auto &sy = particleContainer[i];
             // torque
             sy.forceNonB[0] = forcePtr(6 * i + 0, 0);
             sy.forceNonB[1] = forcePtr(6 * i + 1, 0);
@@ -774,7 +808,7 @@ void SylinderSystem::calcVelocityNonCon() {
     // combine and sync the velNonB set in by setForceNonBrown() and setVelocityNonBrown()
 #pragma omp parallel for
     for (int i = 0; i < nLocal; i++) {
-        auto &sy = sylinderContainer[i];
+        auto &sy = particleContainer[i];
         // velocity
         sy.velNonB[0] = velNCPtr(6 * i + 0, 0);
         sy.velNonB[1] = velNCPtr(6 * i + 1, 0);
@@ -799,11 +833,12 @@ void SylinderSystem::calcVelocityNonCon() {
     }
 }
 
-void SylinderSystem::sumForceVelocity() {
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::sumForceVelocity() {
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
 #pragma omp parallel for
     for (int i = 0; i < nLocal; i++) {
-        auto &sy = sylinderContainer[i];
+        auto &sy = particleContainer[i];
         for (int k = 0; k < 3; k++) {
             sy.vel[k] = sy.velNonB[k] + sy.velBrown[k] + sy.velCol[k] + sy.velBi[k];
             sy.omega[k] = sy.omegaNonB[k] + sy.omegaBrown[k] + sy.omegaCol[k] + sy.omegaBi[k];
@@ -813,24 +848,26 @@ void SylinderSystem::sumForceVelocity() {
     }
 }
 
-void SylinderSystem::stepEuler() {
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::stepEuler() {
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
     const double dt = runConfig.dt;
 
-    if (!runConfig.sylinderFixed) {
+    if (!runConfig.particleFixed) {
 #pragma omp parallel for
         for (int i = 0; i < nLocal; i++) {
-            auto &sy = sylinderContainer[i];
+            auto &sy = particleContainer[i];
             sy.stepEuler(dt);
         }
     }
 }
 
-void SylinderSystem::resolveConstraints() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::resolveConstraints() {
 
     Teuchos::RCP<Teuchos::Time> collectColTimer =
-        Teuchos::TimeMonitor::getNewCounter("SylinderSystem::CollectCollision");
-    Teuchos::RCP<Teuchos::Time> collectLinkTimer = Teuchos::TimeMonitor::getNewCounter("SylinderSystem::CollectLink");
+        Teuchos::TimeMonitor::getNewCounter("ParticleSystem::CollectCollision");
+    Teuchos::RCP<Teuchos::Time> collectLinkTimer = Teuchos::TimeMonitor::getNewCounter("ParticleSystem::CollectLink");
 
     spdlog::debug("start collect collisions");
     {
@@ -848,7 +885,7 @@ void SylinderSystem::resolveConstraints() {
     // solve collision
     // positive buffer value means collision radius is effectively smaller
     // i.e., less likely to collide
-    Teuchos::RCP<Teuchos::Time> solveTimer = Teuchos::TimeMonitor::getNewCounter("SylinderSystem::SolveConstraints");
+    Teuchos::RCP<Teuchos::Time> solveTimer = Teuchos::TimeMonitor::getNewCounter("ParticleSystem::SolveConstraints");
     {
         Teuchos::TimeMonitor mon(*solveTimer);
         const double buffer = 0;
@@ -865,25 +902,28 @@ void SylinderSystem::resolveConstraints() {
     saveForceVelocityConstraints();
 }
 
-void SylinderSystem::updateSylinderMap() {
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
-    // setup the new sylinderMap
-    sylinderMapRcp = getTMAPFromLocalSize(nLocal, commRcp);
-    sylinderMobilityMapRcp = getTMAPFromLocalSize(nLocal * 6, commRcp);
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::updateParticleMap() {
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
+    // setup the new particleMap
+    particleMapRcp = getTMAPFromLocalSize(nLocal, commRcp);
+    particleMobilityMapRcp = getTMAPFromLocalSize(nLocal * 6, commRcp);
 
     // setup the globalIndex
-    int globalIndexBase = sylinderMapRcp->getMinGlobalIndex(); // this is a contiguous map
+    int globalIndexBase = particleMapRcp->getMinGlobalIndex(); // this is a contiguous map
 #pragma omp parallel for
     for (int i = 0; i < nLocal; i++) {
-        sylinderContainer[i].globalIndex = i + globalIndexBase;
+        particleContainer[i].globalIndex = i + globalIndexBase;
     }
 }
 
-bool SylinderSystem::getIfWriteResultCurrentStep() {
+template <int spectralDegree>
+bool ParticleSystem<spectralDegree>::getIfWriteResultCurrentStep() {
     return (stepCount % static_cast<int>(runConfig.timeSnap / runConfig.dt) == 0);
 }
 
-void SylinderSystem::prepareStep() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::prepareStep() {
     spdlog::warn("CurrentStep {}", stepCount);
     applyBoxBC();
 
@@ -891,24 +931,24 @@ void SylinderSystem::prepareStep() {
         decomposeDomain();
     }
 
-    exchangeSylinder();
+    exchangeParticle();
 
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
 #pragma omp parallel for
     for (int i = 0; i < nLocal; i++) {
-        auto &sy = sylinderContainer[i];
+        auto &sy = particleContainer[i];
         sy.clear();
-        sy.radiusCollision = sylinderContainer[i].radius * runConfig.sylinderDiameterColRatio;
-        sy.lengthCollision = sylinderContainer[i].length * runConfig.sylinderLengthColRatio;
+        sy.radiusCollision = particleContainer[i].radius * runConfig.particleDiameterColRatio;
+        sy.lengthCollision = particleContainer[i].length * runConfig.particleLengthColRatio;
         sy.rank = commRcp->getRank();
-        sy.colBuf = runConfig.sylinderColBuf;
+        sy.colBuf = runConfig.particleColBuf;
     }
 
     if (runConfig.monolayer) {
         const double monoZ = (runConfig.simBoxHigh[2] + runConfig.simBoxLow[2]) / 2;
 #pragma omp parallel for
         for (int i = 0; i < nLocal; i++) {
-            auto &sy = sylinderContainer[i];
+            auto &sy = particleContainer[i];
             sy.pos[2] = monoZ;
             Evec3 drt = Emapq(sy.orientation) * Evec3(0, 0, 1);
             drt[2] = 0;
@@ -917,9 +957,9 @@ void SylinderSystem::prepareStep() {
         }
     }
 
-    updateSylinderMap();
+    updateParticleMap();
 
-    buildSylinderNearDataDirectory();
+    buildParticleNearDataDirectory();
 
     calcMobOperator();
 
@@ -931,21 +971,24 @@ void SylinderSystem::prepareStep() {
     velocityBrownRcp.reset();
 }
 
-void SylinderSystem::setForceNonBrown(const std::vector<double> &forceNonBrown) {
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::setForceNonBrown(const std::vector<double> &forceNonBrown) {
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
     TEUCHOS_ASSERT(forceNonBrown.size() == 6 * nLocal);
-    TEUCHOS_ASSERT(sylinderMobilityMapRcp->getNodeNumElements() == 6 * nLocal);
+    TEUCHOS_ASSERT(particleMobilityMapRcp->getNodeNumElements() == 6 * nLocal);
     forcePartNonBrownRcp = getTVFromVector(forceNonBrown, commRcp);
 }
 
-void SylinderSystem::setVelocityNonBrown(const std::vector<double> &velNonBrown) {
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::setVelocityNonBrown(const std::vector<double> &velNonBrown) {
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
     TEUCHOS_ASSERT(velNonBrown.size() == 6 * nLocal);
-    TEUCHOS_ASSERT(sylinderMobilityMapRcp->getNodeNumElements() == 6 * nLocal);
+    TEUCHOS_ASSERT(particleMobilityMapRcp->getNodeNumElements() == 6 * nLocal);
     velocityPartNonBrownRcp = getTVFromVector(velNonBrown, commRcp);
 }
 
-void SylinderSystem::runStep() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::runStep() {
 
     if (runConfig.KBT > 0) {
         calcVelocityBrown();
@@ -967,7 +1010,8 @@ void SylinderSystem::runStep() {
     stepCount++;
 }
 
-void SylinderSystem::saveForceVelocityConstraints() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::saveForceVelocityConstraints() {
     // save results
     forceUniRcp = conSolverPtr->getForceUni();
     velocityUniRcp = conSolverPtr->getVelocityUni();
@@ -979,15 +1023,15 @@ void SylinderSystem::saveForceVelocityConstraints() {
     auto forceUniPtr = forceUniRcp->getLocalView<Kokkos::HostSpace>();
     auto forceBiPtr = forceBiRcp->getLocalView<Kokkos::HostSpace>();
 
-    const int sylinderLocalNumber = sylinderContainer.getNumberOfParticleLocal();
-    TEUCHOS_ASSERT(velUniPtr.dimension_0() == sylinderLocalNumber * 6);
+    const int particleLocalNumber = particleContainer.getNumberOfParticleLocal();
+    TEUCHOS_ASSERT(velUniPtr.dimension_0() == particleLocalNumber * 6);
     TEUCHOS_ASSERT(velUniPtr.dimension_1() == 1);
-    TEUCHOS_ASSERT(velBiPtr.dimension_0() == sylinderLocalNumber * 6);
+    TEUCHOS_ASSERT(velBiPtr.dimension_0() == particleLocalNumber * 6);
     TEUCHOS_ASSERT(velBiPtr.dimension_1() == 1);
 
 #pragma omp parallel for
-    for (int i = 0; i < sylinderLocalNumber; i++) {
-        auto &sy = sylinderContainer[i];
+    for (int i = 0; i < particleLocalNumber; i++) {
+        auto &sy = particleContainer[i];
         sy.velCol[0] = velUniPtr(6 * i + 0, 0);
         sy.velCol[1] = velUniPtr(6 * i + 1, 0);
         sy.velCol[2] = velUniPtr(6 * i + 2, 0);
@@ -1016,8 +1060,9 @@ void SylinderSystem::saveForceVelocityConstraints() {
     }
 }
 
-void SylinderSystem::calcVelocityBrown() {
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::calcVelocityBrown() {
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
     const double Pi = 3.1415926535897932384626433;
     const double mu = runConfig.viscosity;
     const double dt = runConfig.dt;
@@ -1030,7 +1075,7 @@ void SylinderSystem::calcVelocityBrown() {
         const int threadId = omp_get_thread_num();
 #pragma omp for
         for (int i = 0; i < nLocal; i++) {
-            auto &sy = sylinderContainer[i];
+            auto &sy = particleContainer[i];
             // constants
             double dragPara = 0;
             double dragPerp = 0;
@@ -1070,7 +1115,7 @@ void SylinderSystem::calcVelocityBrown() {
         }
     }
 
-    velocityBrownRcp = Teuchos::rcp<TV>(new TV(sylinderMobilityMapRcp, true));
+    velocityBrownRcp = Teuchos::rcp<TV>(new TV(particleMobilityMapRcp, true));
     auto velocityPtr = velocityBrownRcp->getLocalView<Kokkos::HostSpace>();
     velocityBrownRcp->modify<Kokkos::HostSpace>();
 
@@ -1079,7 +1124,7 @@ void SylinderSystem::calcVelocityBrown() {
 
 #pragma omp parallel for
     for (int i = 0; i < nLocal; i++) {
-        const auto &sy = sylinderContainer[i];
+        const auto &sy = particleContainer[i];
         velocityPtr(6 * i, 0) = sy.velBrown[0];
         velocityPtr(6 * i + 1, 0) = sy.velBrown[1];
         velocityPtr(6 * i + 2, 0) = sy.velBrown[2];
@@ -1089,10 +1134,40 @@ void SylinderSystem::calcVelocityBrown() {
     }
 }
 
-void SylinderSystem::collectBoundaryCollision() {
+template <int spectralDegree>
+void CellSystem<spectralDegree>::calcHydroVelocity() {
+    PS::ParticleSystem<Sylinder<spectralDegree>> &particleContainer = particleSystem.getContainerNonConst();
+    Teuchos::RCP<HydroRodMobility<PS::ParticleSystem<Sylinder<spectralDegree>>>> hydroMobOpRcp =
+        Teuchos::rcp(new HydroRodMobility<PS::ParticleSystem<Sylinder<spectralDegree>>, SQWCollector<spectralDegree>>(
+            &particleContainer, particleContainer.getNumberOfParticleLocal(), fmmPtr, runConfig,
+            particleSystem.runConfig));
+
+    hydroMobOpRcp->calcMotion();
+    hydroMobOpRcp->cacheResults(particleContainer);
+
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
+    std::vector<double> particleVelOmega(6 * nLocal, 0);
+
+    // hydro & swim velocity
+#pragma omp parallel for
+    for (int i = 0; i < nLocal; i++) {
+        const auto &ptc = particleContainer[i];
+        // get velocity
+        for (int k = 0; k < 3; k++) {
+            particleVelOmega[6 * i + k] = ptc.velHydro[k];       // Vel
+            particleVelOmega[6 * i + 3 + k] = ptc.omegaHydro[k]; // Omega
+        }
+    }
+
+    setVelocityNonBrown(particleVelOmega);
+}
+
+
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::collectBoundaryCollision() {
     auto collisionPoolPtr = conCollectorPtr->constraintPoolPtr; // shared_ptr
     const int nThreads = collisionPoolPtr->size();
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
 
     // process collisions with all boundaries
     for (const auto &bPtr : runConfig.boundaryPtr) {
@@ -1102,7 +1177,7 @@ void SylinderSystem::collectBoundaryCollision() {
             auto &que = (*collisionPoolPtr)[threadId];
 #pragma omp for
             for (int i = 0; i < nLocal; i++) {
-                const auto &sy = sylinderContainer[i];
+                const auto &sy = particleContainer[i];
                 const Evec3 center = ECmap3(sy.pos);
 
                 // check one point
@@ -1123,7 +1198,7 @@ void SylinderSystem::collectBoundaryCollision() {
                                          norm.data(), norm.data(), posI.data(), posI.data(), Query.data(), Proj, true,
                                          false, 0.0, 0.0);
                     } else if (deltanorm <
-                               (1 + runConfig.sylinderColBuf * 2) * sy.radiusCollision) { // inside boundary but close
+                               (1 + runConfig.particleColBuf * 2) * sy.radiusCollision) { // inside boundary but close
                         que.emplace_back(deltanorm - radius, 0, sy.gid, sy.gid, sy.globalIndex, sy.globalIndex,
                                          norm.data(), norm.data(), posI.data(), posI.data(), Query.data(), Proj, true,
                                          false, 0.0, 0.0);
@@ -1148,21 +1223,23 @@ void SylinderSystem::collectBoundaryCollision() {
     return;
 }
 
-void SylinderSystem::collectPairCollision() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::collectPairCollision() {
 
-    CalcSylinderNearForce calcColFtr(conCollectorPtr->constraintPoolPtr);
+    CalcParticleNearForce calcColFtr(conCollectorPtr->constraintPoolPtr);
 
-    TEUCHOS_ASSERT(treeSylinderNearPtr);
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
-    setTreeSylinder();
-    treeSylinderNearPtr->calcForceAll(calcColFtr, sylinderContainer, dinfo);
+    TEUCHOS_ASSERT(treeParticleNearPtr);
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
+    setTreeParticle();
+    treeParticleNearPtr->calcForceAll(calcColFtr, particleContainer, dinfo);
 }
 
-std::pair<int, int> SylinderSystem::getMaxGid() {
+template <int spectralDegree>
+std::pair<int, int> ParticleSystem<spectralDegree>::getMaxGid() {
     int maxGidLocal = 0;
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
     for (int i = 0; i < nLocal; i++) {
-        maxGidLocal = std::max(maxGidLocal, sylinderContainer[i].gid);
+        maxGidLocal = std::max(maxGidLocal, particleContainer[i].gid);
     }
 
     int maxGidGlobal = maxGidLocal;
@@ -1172,16 +1249,17 @@ std::pair<int, int> SylinderSystem::getMaxGid() {
     return std::pair<int, int>(maxGidLocal, maxGidGlobal);
 }
 
-void SylinderSystem::calcBoundingBox(double localLow[3], double localHigh[3], double globalLow[3],
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::calcBoundingBox(double localLow[3], double localHigh[3], double globalLow[3],
                                      double globalHigh[3]) {
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
     double lx, ly, lz;
     lx = ly = lz = std::numeric_limits<double>::max();
     double hx, hy, hz;
     hx = hy = hz = std::numeric_limits<double>::min();
 
     for (int i = 0; i < nLocal; i++) {
-        const auto &sy = sylinderContainer[i];
+        const auto &sy = particleContainer[i];
         const Evec3 direction = ECmapq(sy.orientation) * Evec3(0, 0, 1);
         Evec3 pm = ECmap3(sy.pos) - (sy.length * 0.5) * direction;
         Evec3 pp = ECmap3(sy.pos) + (sy.length * 0.5) * direction;
@@ -1211,18 +1289,21 @@ void SylinderSystem::calcBoundingBox(double localLow[3], double localHigh[3], do
     return;
 }
 
-void SylinderSystem::updateSylinderRank() {
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::updateParticleRank() {
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
     const int rank = commRcp->getRank();
 #pragma omp parallel for
     for (int i = 0; i < nLocal; i++) {
-        sylinderContainer[i].rank = rank;
+        particleContainer[i].rank = rank;
     }
 }
 
-void SylinderSystem::applyBoxBC() { sylinderContainer.adjustPositionIntoRootDomain(dinfo); }
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::applyBoxBC() { particleContainer.adjustPositionIntoRootDomain(dinfo); }
 
-void SylinderSystem::calcConStress() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::calcConStress() {
     if (runConfig.logLevel > spdlog::level::info)
         return;
 
@@ -1231,7 +1312,7 @@ void SylinderSystem::calcConStress() {
     conCollectorPtr->sumLocalConstraintStress(sumUniStress, sumBiStress, false);
 
     // scale to nkBT
-    const double scaleFactor = 1 / (sylinderMapRcp->getGlobalNumElements() * runConfig.KBT);
+    const double scaleFactor = 1 / (particleMapRcp->getGlobalNumElements() * runConfig.KBT);
     sumBiStress *= scaleFactor;
     sumUniStress *= scaleFactor;
     // mpi reduction
@@ -1261,7 +1342,8 @@ void SylinderSystem::calcConStress() {
                  biStressGlobal[6], biStressGlobal[7], biStressGlobal[8]);
 }
 
-void SylinderSystem::calcOrderParameter() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::calcOrderParameter() {
     if (runConfig.logLevel > spdlog::level::info)
         return;
 
@@ -1270,11 +1352,11 @@ void SylinderSystem::calcOrderParameter() {
     double Qyx = 0, Qyy = 0, Qyz = 0; // Qtensor
     double Qzx = 0, Qzy = 0, Qzz = 0; // Qtensor
 
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
 
 #pragma omp parallel for reduction(+ : px, py, pz, Qxx, Qxy, Qxz, Qyx, Qyy, Qyz, Qzx, Qzy, Qzz)
     for (int i = 0; i < nLocal; i++) {
-        const auto &sy = sylinderContainer[i];
+        const auto &sy = particleContainer[i];
         const Evec3 direction = ECmapq(sy.orientation) * Evec3(0, 0, 1);
         px += direction.x();
         py += direction.y();
@@ -1292,7 +1374,7 @@ void SylinderSystem::calcOrderParameter() {
     }
 
     // global average
-    const int nGlobal = sylinderContainer.getNumberOfParticleGlobal();
+    const int nGlobal = particleContainer.getNumberOfParticleGlobal();
     double pQ[12] = {px, py, pz, Qxx, Qxy, Qxz, Qyx, Qyy, Qyz, Qzx, Qzy, Qzz};
     MPI_Allreduce(MPI_IN_PLACE, pQ, 12, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 
@@ -1308,12 +1390,13 @@ void SylinderSystem::calcOrderParameter() {
     );
 }
 
-std::vector<int> SylinderSystem::addNewSylinder(const std::vector<Sylinder> &newSylinder) {
-    // assign unique new gid for sylinders on all ranks
+template <int spectralDegree>
+std::vector<int> ParticleSystem<spectralDegree>::addNewParticle(const std::vector<Particle> &newParticle) {
+    // assign unique new gid for particles on all ranks
     std::pair<int, int> maxGid = getMaxGid();
     const int maxGidLocal = maxGid.first;
     const int maxGidGlobal = maxGid.second;
-    const int newCountLocal = newSylinder.size();
+    const int newCountLocal = newParticle.size();
 
     // collect number of ids from all ranks to rank0
     std::vector<int> newCount(commRcp->getSize(), 0);
@@ -1341,15 +1424,16 @@ std::vector<int> SylinderSystem::addNewSylinder(const std::vector<Sylinder> &new
 
     // set new gid
     for (int i = 0; i < newCountLocal; i++) {
-        Sylinder sy = newSylinder[i];
+        Particle sy = newParticle[i];
         sy.gid = newGidRecv[i];
-        sylinderContainer.addOneParticle(sy);
+        particleContainer.addOneParticle(sy);
     }
 
     return newGidRecv;
 }
 
-void SylinderSystem::addNewLink(const std::vector<Link> &newLink) {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::addNewLink(const std::vector<Link> &newLink) {
     // synchronize newLink to all mpi ranks
     const int newCountLocal = newLink.size();
     std::vector<int> newCount(commRcp->getSize(), 0);
@@ -1367,26 +1451,28 @@ void SylinderSystem::addNewLink(const std::vector<Link> &newLink) {
     }
 }
 
-void SylinderSystem::buildSylinderNearDataDirectory() {
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
-    auto &sylinderNearDataDirectory = *sylinderNearDataDirectoryPtr;
-    sylinderNearDataDirectory.gidOnLocal.resize(nLocal);
-    sylinderNearDataDirectory.dataOnLocal.resize(nLocal);
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::buildParticleNearDataDirectory() {
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
+    auto &particleNearDataDirectory = *particleNearDataDirectoryPtr;
+    particleNearDataDirectory.gidOnLocal.resize(nLocal);
+    particleNearDataDirectory.dataOnLocal.resize(nLocal);
 #pragma omp parallel for
     for (int i = 0; i < nLocal; i++) {
-        sylinderNearDataDirectory.gidOnLocal[i] = sylinderContainer[i].gid;
-        sylinderNearDataDirectory.dataOnLocal[i].copyFromFP(sylinderContainer[i]);
+        particleNearDataDirectory.gidOnLocal[i] = particleContainer[i].gid;
+        particleNearDataDirectory.dataOnLocal[i].copyFromFP(particleContainer[i]);
     }
 
     // build index
-    sylinderNearDataDirectory.buildIndex();
+    particleNearDataDirectory.buildIndex();
 }
 
-void SylinderSystem::collectLinkBilateral() {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::collectLinkBilateral() {
     // setup bilateral link constraints
     // need special treatment of periodic boundary conditions
 
-    const int nLocal = sylinderContainer.getNumberOfParticleLocal();
+    const int nLocal = particleContainer.getNumberOfParticleLocal();
     auto &conPool = *(this->conCollectorPtr->constraintPoolPtr);
     if (conPool.size() != omp_get_max_threads()) {
         spdlog::critical("conPool multithread mismatch error");
@@ -1394,27 +1480,27 @@ void SylinderSystem::collectLinkBilateral() {
     }
 
     // fill the data to find
-    auto &gidToFind = sylinderNearDataDirectoryPtr->gidToFind;
-    const auto &dataToFind = sylinderNearDataDirectoryPtr->dataToFind;
+    auto &gidToFind = particleNearDataDirectoryPtr->gidToFind;
+    const auto &dataToFind = particleNearDataDirectoryPtr->dataToFind;
 
     std::vector<int> gidDisp(nLocal + 1, 0);
     gidToFind.clear();
     gidToFind.reserve(nLocal);
 
-    // loop over all sylinders
+    // loop over all particles
     // if linkMap[sy.gid] not empty, find info for all next
     for (int i = 0; i < nLocal; i++) {
-        const auto &sy = sylinderContainer[i];
+        const auto &sy = particleContainer[i];
         const auto &range = linkMap.equal_range(sy.gid);
         int count = 0;
         for (auto it = range.first; it != range.second; it++) {
             gidToFind.push_back(it->second); // next
             count++;
         }
-        gidDisp[i + 1] = gidDisp[i] + count; // number of links for each local Sylinder
+        gidDisp[i + 1] = gidDisp[i] + count; // number of links for each local Particle
     }
 
-    sylinderNearDataDirectoryPtr->find();
+    particleNearDataDirectoryPtr->find();
 
 #pragma omp parallel
     {
@@ -1422,12 +1508,12 @@ void SylinderSystem::collectLinkBilateral() {
         auto &conQue = conPool[threadId];
 #pragma omp for
         for (int i = 0; i < nLocal; i++) {
-            const auto &syI = sylinderContainer[i]; // sylinder
+            const auto &syI = particleContainer[i]; // particle
             const int lb = gidDisp[i];
             const int ub = gidDisp[i + 1];
 
             for (int j = lb; j < ub; j++) {
-                const auto &syJ = sylinderNearDataDirectoryPtr->dataToFind[j]; // sylinderNear
+                const auto &syJ = particleNearDataDirectoryPtr->dataToFind[j]; // particleNear
 
                 const Evec3 &centerI = ECmap3(syI.pos);
                 Evec3 centerJ = ECmap3(syJ.pos);
@@ -1445,7 +1531,7 @@ void SylinderSystem::collectLinkBilateral() {
                         std::exit(1);
                     }
                 }
-                // sylinders are not treated as spheres for bilateral constraints
+                // particles are not treated as spheres for bilateral constraints
                 // constraint is always added between Pp and Qm
                 // constraint target length is radiusI + radiusJ + runConfig.linkGap
                 const Evec3 directionI = ECmapq(syI.orientation) * Evec3(0, 0, 1);
@@ -1471,7 +1557,7 @@ void SylinderSystem::collectLinkBilateral() {
                                          Ploc.data(), Qloc.data(), // location of collision in lab frame
                                          false, true, runConfig.linkKappa, 0.0);
                 Emat3 stressIJ;
-                CalcSylinderNearForce::collideStress(directionI, directionJ, centerI, centerJ, syI.length, syJ.length,
+                CalcParticleNearForce::collideStress(directionI, directionJ, centerI, centerJ, syI.length, syJ.length,
                                                      syI.radius, syJ.radius, 1.0, Ploc, Qloc, stressIJ);
                 conBlock.setStress(stressIJ);
                 conQue.push_back(conBlock);
@@ -1480,7 +1566,8 @@ void SylinderSystem::collectLinkBilateral() {
     }
 }
 
-void SylinderSystem::printTimingSummary(const bool zeroOut) {
+template <int spectralDegree>
+void ParticleSystem<spectralDegree>::printTimingSummary(const bool zeroOut) {
     if (runConfig.timerLevel <= spdlog::level::info)
         Teuchos::TimeMonitor::summarize();
     if (zeroOut)

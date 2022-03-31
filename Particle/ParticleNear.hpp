@@ -1,17 +1,17 @@
 /**
- * @file SylinderNear.hpp
+ * @file ParticleNear.hpp
  * @author wenyan4work (wenyan4work@gmail.com)
- * @brief Essential type for sylinder short range interactions
+ * @brief Essential type for particle short range interactions
  * @version 1.0
  * @date 2018-12-13
  *
  * @copyright Copyright (c) 2018
  *
  */
-#ifndef SylinderNear_HPP_
-#define SylinderNear_HPP_
+#ifndef ParticleNear_HPP_
+#define ParticleNear_HPP_
 
-#include "Sylinder.hpp"
+#include "Particle.hpp"
 
 #include "Collision/DCPQuery.hpp"
 #include "Constraint/ConstraintCollector.hpp"
@@ -33,14 +33,15 @@
  */
 
 /**
- * @brief Essential type for sylinder short range interactions
+ * @brief Essential type for particle short range interactions
  *
  * Essential Particle Class for FDPS
  */
-struct SylinderNearEP {
+template <int maxSpectralDegree>
+struct ParticleNearEP {
   public:
     int gid;                            ///< global unique id
-    int globalIndex;                    ///< sequentially ordered unique index in sylinder map
+    int globalIndex;                    ///< sequentially ordered unique index in particle map
     int rank;                           ///< mpi rank of owning rank
     double radius;                      ///< radius
     double length;                      ///< length
@@ -59,19 +60,19 @@ struct SylinderNearEP {
     int getGid() const { return gid; }
 
     /**
-     * @brief Get global index (sequentially ordered in sylinder map)
+     * @brief Get global index (sequentially ordered in particle map)
      *
      * @return int
      */
     int getGlobalIndex() const { return globalIndex; }
 
     /**
-     * @brief copy data fields from full type Sylinder
+     * @brief copy data fields from full type Particle
      *
      * interface for FDPS
      * @param fp
      */
-    void copyFromFP(const Sylinder &fp) {
+    void copyFromFP(const Particle &fp) {
         gid = fp.gid;
         globalIndex = fp.globalIndex;
         rank = fp.rank;
@@ -130,8 +131,8 @@ struct SylinderNearEP {
     }
 };
 
-static_assert(std::is_trivially_copyable<SylinderNearEP>::value, "");
-static_assert(std::is_default_constructible<SylinderNearEP>::value, "");
+static_assert(std::is_trivially_copyable<ParticleNearEP<1>>::value, "");
+static_assert(std::is_default_constructible<ParticleNearEP<1>>::value, "");
 
 /**
  * @brief collect short range interaction forces
@@ -157,23 +158,24 @@ static_assert(std::is_default_constructible<ForceNear>::value, "");
  * @brief callable object to collect collision blocks and compute near force
  *
  */
-class CalcSylinderNearForce {
+template <int maxSpectralDegree>
+class CalcParticleNearForce {
 
   public:
     std::shared_ptr<ConstraintBlockPool> conPoolPtr; ///< shared object for collecting collision constraints
 
     /**
-     * @brief Construct a new CalcSylinderNearForce object
+     * @brief Construct a new CalcParticleNearForce object
      *
      */
-    CalcSylinderNearForce() = default;
+    CalcParticleNearForce() = default;
 
     /**
-     * @brief Construct a new CalcSylinderNearForce object
+     * @brief Construct a new CalcParticleNearForce object
      *
      * @param colPoolPtr_ the CollisionBlockPool object to write to
      */
-    CalcSylinderNearForce(std::shared_ptr<ConstraintBlockPool> &conPoolPtr_) {
+    CalcParticleNearForce(std::shared_ptr<ConstraintBlockPool> &conPoolPtr_) {
         spdlog::debug("stress recoder size: {}", conPoolPtr_->size());
 
         conPoolPtr = conPoolPtr_;
@@ -182,8 +184,8 @@ class CalcSylinderNearForce {
 
     /**
      * @brief interaction functor called by FDPS internally
-     *   when a sylinder has length < diameter, it is treated as a sphere with radius_eff = radius + 0.5*length,
-     *   i.e., a big sphere that completely encapsules this sylinder.
+     *   when a particle has length < diameter, it is treated as a sphere with radius_eff = radius + 0.5*length,
+     *   i.e., a big sphere that completely encapsules this particle.
      *   collision stress is also calculated in this way
      * @param ep_i target
      * @param Nip number of target
@@ -191,7 +193,7 @@ class CalcSylinderNearForce {
      * @param Njp number of source
      * @param forceNear computed force
      */
-    void operator()(const SylinderNearEP *const ep_i, const PS::S32 Nip, const SylinderNearEP *const ep_j,
+    void operator()(const ParticleNearEP<maxSpectralDegree> *const ep_i, const PS::S32 Nip, const ParticleNearEP<maxSpectralDegree> *const ep_j,
                     const PS::S32 Njp, ForceNear *const forceNear) {
         const int myThreadId = omp_get_thread_num();
         auto &conQue = (*conPoolPtr)[myThreadId];
@@ -216,7 +218,7 @@ class CalcSylinderNearForce {
                     if (collision)
                         conQue.push_back(conBlock);
                 }
-            } else { // sylinderI collisions
+            } else { // particleI collisions
                 for (int j = 0; j < Njp; j++) {
                     auto &syJ = ep_j[j];
                     if (syI.gid >= syJ.gid)
@@ -235,7 +237,7 @@ class CalcSylinderNearForce {
         }
     }
 
-    bool isSphere(const SylinderNearEP &sy) const { return sy.lengthCollision < 2 * sy.radiusCollision; }
+    bool isSphere(const ParticleNearEP &sy) const { return sy.lengthCollision < 2 * sy.radiusCollision; }
 
     /**
      * @brief
@@ -247,7 +249,7 @@ class CalcSylinderNearForce {
      * @return true
      * @return false
      */
-    bool sp_sp(const SylinderNearEP &spI, const SylinderNearEP &spJ, ForceNear &forceI,
+    bool sp_sp(const ParticleNearEP &spI, const ParticleNearEP &spJ, ForceNear &forceI,
                ConstraintBlock &conBlock) const {
         // sphere collide with sphere
         const Evec3 centerI = ECmap3(spI.pos);
@@ -292,17 +294,17 @@ class CalcSylinderNearForce {
     /**
      * @brief
      *
-     * @param sp the sylinder treated as a sphere
-     * @param sy the sylinder
+     * @param sp the particle treated as a sphere
+     * @param sy the particle
      * @param forceI
      * @param conBlock
      * @param reverseIJ default = false. if true, reverse I and J when adding the constraint block
      * @return true
      * @return false
      */
-    bool sp_sy(const SylinderNearEP &spI, const SylinderNearEP &syJ, ForceNear &forceI, ConstraintBlock &conBlock,
+    bool sp_sy(const ParticleNearEP<maxSpectralDegree> &spI, const ParticleNearEP<maxSpectralDegree> &syJ, ForceNear &forceI, ConstraintBlock &conBlock,
                bool reverseIJ = false) const {
-        // sphere collide with sylinder
+        // sphere collide with particle
         // effective radius of sphere = sp.lengthCollision*0.5 + sp.radiusCollision
 
         const Evec3 centerI = ECmap3(spI.pos);
@@ -359,9 +361,9 @@ class CalcSylinderNearForce {
      * @return true
      * @return false
      */
-    bool sy_sy(const SylinderNearEP &syI, const SylinderNearEP &syJ, ForceNear &forceI,
+    bool sy_sy(const ParticleNearEP<maxSpectralDegree> &syI, const ParticleNearEP<maxSpectralDegree> &syJ, ForceNear &forceI,
                ConstraintBlock &conBlock) const {
-        // sylinder collide with sylinder
+        // particle collide with particle
         DCPQuery<3, double, Evec3> DistSegSeg3;
 
         const Evec3 centerI = ECmap3(syI.pos);
@@ -408,7 +410,7 @@ class CalcSylinderNearForce {
     }
 
     /**
-     * @brief compute collision stress for a pair of sylinders
+     * @brief compute collision stress for a pair of particles
      *
      * @param dirI direction of I
      * @param dirJ direction of J
@@ -478,7 +480,7 @@ class CalcSylinderNearForce {
     }
 
     /**
-     * @brief initialize the tensor integral N for sylinder aligned with z axis
+     * @brief initialize the tensor integral N for particle aligned with z axis
      *
      * @param NI [out] tensor integral N
      * @param r
@@ -495,7 +497,7 @@ class CalcSylinderNearForce {
     }
 
     /**
-     * @brief initialize the tensor integral GAMMAI for sylinder aligned with z axis
+     * @brief initialize the tensor integral GAMMAI for particle aligned with z axis
      *
      * @param GAMMAI
      * @param r
@@ -513,9 +515,10 @@ class CalcSylinderNearForce {
 };
 
 /**
- * @brief tree type for computing near interaction of sylinders
+ * @brief tree type for computing near interaction of particles
  *
  */
-using TreeSylinderNear = PS::TreeForForceShort<ForceNear, SylinderNearEP, SylinderNearEP>::Symmetry;
+template <int maxSpectralDegree>
+using TreeParticleNear = PS::TreeForForceShort<ForceNear, ParticleNearEP<maxSpectralDegree>, ParticleNearEP<maxSpectralDegree>>::Symmetry;
 
 #endif

@@ -1,4 +1,4 @@
-#include "SylinderNear.hpp"
+#include "ParticleNear.hpp"
 #include "Util/EigenDef.hpp"
 #include <cmath>
 
@@ -47,47 +47,47 @@ void testFixedPair() {
     Evec3 Q0(0, 0, 1);
     Evec3 Q1(2, 2 * sqrt(3), 1);
 
-    CalcSylinderNearForce calc;
+    CalcParticleNearForce calc;
     calc.conPoolPtr = std::make_shared<ConstraintBlockPool>();
     calc.conPoolPtr->resize(1);
 
-    std::vector<SylinderNearEP> sylinderP(1);
-    std::vector<SylinderNearEP> sylinderQ(1);
+    std::vector<ParticleNearEP<1>> particleP(1);
+    std::vector<ParticleNearEP<1>> particleQ(1);
 
     { // setup P
         Evec3 center = (P0 + P1) / 2;
         Evec3 direction = (P1 - P0).normalized();
         double length = (P1 - P0).norm();
-        sylinderP[0].gid = 0;
-        sylinderP[0].globalIndex = 0;
-        sylinderP[0].rank = 0;
-        sylinderP[0].radiusCollision = 0.4;
-        sylinderP[0].lengthCollision = length;
-        sylinderP[0].pos[0] = center[0];
-        sylinderP[0].pos[1] = center[1];
-        sylinderP[0].pos[2] = center[2];
-        sylinderP[0].direction[0] = direction[0];
-        sylinderP[0].direction[1] = direction[1];
-        sylinderP[0].direction[2] = direction[2];
+        particleP[0].gid = 0;
+        particleP[0].globalIndex = 0;
+        particleP[0].rank = 0;
+        particleP[0].radiusCollision = 0.4;
+        particleP[0].lengthCollision = length;
+        particleP[0].pos[0] = center[0];
+        particleP[0].pos[1] = center[1];
+        particleP[0].pos[2] = center[2];
+        particleP[0].direction[0] = direction[0];
+        particleP[0].direction[1] = direction[1];
+        particleP[0].direction[2] = direction[2];
     }
     { // setup Q
         Evec3 center = (Q0 + Q1) / 2;
         Evec3 direction = (Q1 - Q0).normalized();
         double length = (Q1 - Q0).norm();
-        sylinderQ[0].gid = 1;
-        sylinderQ[0].globalIndex = 1;
-        sylinderQ[0].rank = 0;
-        sylinderQ[0].radiusCollision = 0.5;
-        sylinderQ[0].lengthCollision = length;
-        sylinderQ[0].pos[0] = center[0];
-        sylinderQ[0].pos[1] = center[1];
-        sylinderQ[0].pos[2] = center[2];
-        sylinderQ[0].direction[0] = direction[0];
-        sylinderQ[0].direction[1] = direction[1];
-        sylinderQ[0].direction[2] = direction[2];
+        particleQ[0].gid = 1;
+        particleQ[0].globalIndex = 1;
+        particleQ[0].rank = 0;
+        particleQ[0].radiusCollision = 0.5;
+        particleQ[0].lengthCollision = length;
+        particleQ[0].pos[0] = center[0];
+        particleQ[0].pos[1] = center[1];
+        particleQ[0].pos[2] = center[2];
+        particleQ[0].direction[0] = direction[0];
+        particleQ[0].direction[1] = direction[1];
+        particleQ[0].direction[2] = direction[2];
     }
     ForceNear fnear;
-    calc(sylinderP.data(), 1, sylinderQ.data(), 1, &fnear);
+    calc(particleP.data(), 1, particleQ.data(), 1, &fnear);
     printf("%zu collisions recorded\n", calc.conPoolPtr->front().size());
     auto stress = calc.conPoolPtr->front().front().stress;
     printf("stress:\n");
@@ -117,47 +117,47 @@ void testParallel() {
     Evec3 Q0(1.005687630910662, 1.464364624867677, 1.500001338752708);
     Evec3 Q1(2.005685087440173, 1.462109203504082, 1.4999983414464);
 
-    CalcSylinderNearForce calc;
+    CalcParticleNearForce calc;
     calc.conPoolPtr = std::make_shared<ConstraintBlockPool>();
     calc.conPoolPtr->resize(1);
 
-    std::vector<SylinderNearEP> sylinderP(1);
-    std::vector<SylinderNearEP> sylinderQ(1);
+    std::vector<ParticleNearEP<1>> particleP(1);
+    std::vector<ParticleNearEP<1>> particleQ(1);
 
     { // setup P
         Evec3 center = (P0 + P1) / 2;
         Evec3 direction = (P1 - P0).normalized();
         double length = (P1 - P0).norm();
-        sylinderP[0].gid = 0;
-        sylinderP[0].globalIndex = 0;
-        sylinderP[0].rank = 0;
-        sylinderP[0].radiusCollision = 0.4;
-        sylinderP[0].lengthCollision = length;
-        sylinderP[0].pos[0] = center[0];
-        sylinderP[0].pos[1] = center[1];
-        sylinderP[0].pos[2] = center[2];
-        sylinderP[0].direction[0] = direction[0];
-        sylinderP[0].direction[1] = direction[1];
-        sylinderP[0].direction[2] = direction[2];
+        particleP[0].gid = 0;
+        particleP[0].globalIndex = 0;
+        particleP[0].rank = 0;
+        particleP[0].radiusCollision = 0.4;
+        particleP[0].lengthCollision = length;
+        particleP[0].pos[0] = center[0];
+        particleP[0].pos[1] = center[1];
+        particleP[0].pos[2] = center[2];
+        particleP[0].direction[0] = direction[0];
+        particleP[0].direction[1] = direction[1];
+        particleP[0].direction[2] = direction[2];
     }
     { // setup Q
         Evec3 center = (Q0 + Q1) / 2;
         Evec3 direction = (Q1 - Q0).normalized();
         double length = (Q1 - Q0).norm();
-        sylinderQ[0].gid = 1;
-        sylinderQ[0].globalIndex = 1;
-        sylinderQ[0].rank = 0;
-        sylinderQ[0].radiusCollision = 0.5;
-        sylinderQ[0].lengthCollision = length;
-        sylinderQ[0].pos[0] = center[0];
-        sylinderQ[0].pos[1] = center[1];
-        sylinderQ[0].pos[2] = center[2];
-        sylinderQ[0].direction[0] = direction[0];
-        sylinderQ[0].direction[1] = direction[1];
-        sylinderQ[0].direction[2] = direction[2];
+        particleQ[0].gid = 1;
+        particleQ[0].globalIndex = 1;
+        particleQ[0].rank = 0;
+        particleQ[0].radiusCollision = 0.5;
+        particleQ[0].lengthCollision = length;
+        particleQ[0].pos[0] = center[0];
+        particleQ[0].pos[1] = center[1];
+        particleQ[0].pos[2] = center[2];
+        particleQ[0].direction[0] = direction[0];
+        particleQ[0].direction[1] = direction[1];
+        particleQ[0].direction[2] = direction[2];
     }
     ForceNear fnear;
-    calc(sylinderP.data(), 1, sylinderQ.data(), 1, &fnear);
+    calc(particleP.data(), 1, particleQ.data(), 1, &fnear);
     printf("%zu collisions recorded\n", calc.conPoolPtr->front().size());
     auto stress = calc.conPoolPtr->front().front().stress;
     auto block = calc.conPoolPtr->front().front();
@@ -176,47 +176,47 @@ void testSphere() {
     Evec3 Q0 = P0 + Evec3(1, 2., 3.);
     Evec3 Q1 = Q0 + Evec3::Random();
 
-    CalcSylinderNearForce calc;
+    CalcParticleNearForce calc;
     calc.conPoolPtr = std::make_shared<ConstraintBlockPool>();
     calc.conPoolPtr->resize(1);
 
-    std::vector<SylinderNearEP> sylinderP(1);
-    std::vector<SylinderNearEP> sylinderQ(1);
+    std::vector<ParticleNearEP<1>> particleP(1);
+    std::vector<ParticleNearEP<1>> particleQ(1);
 
     { // setup P
         Evec3 center = (P0 + P1) / 2;
         Evec3 direction = (P1 - P0).normalized();
         double length = (P1 - P0).norm();
-        sylinderP[0].gid = 0;
-        sylinderP[0].globalIndex = 0;
-        sylinderP[0].rank = 0;
-        sylinderP[0].radiusCollision = length;
-        sylinderP[0].lengthCollision = length;
-        sylinderP[0].pos[0] = center[0];
-        sylinderP[0].pos[1] = center[1];
-        sylinderP[0].pos[2] = center[2];
-        sylinderP[0].direction[0] = direction[0];
-        sylinderP[0].direction[1] = direction[1];
-        sylinderP[0].direction[2] = direction[2];
+        particleP[0].gid = 0;
+        particleP[0].globalIndex = 0;
+        particleP[0].rank = 0;
+        particleP[0].radiusCollision = length;
+        particleP[0].lengthCollision = length;
+        particleP[0].pos[0] = center[0];
+        particleP[0].pos[1] = center[1];
+        particleP[0].pos[2] = center[2];
+        particleP[0].direction[0] = direction[0];
+        particleP[0].direction[1] = direction[1];
+        particleP[0].direction[2] = direction[2];
     }
     { // setup Q
         Evec3 center = (Q0 + Q1) / 2;
         Evec3 direction = (Q1 - Q0).normalized();
         double length = (Q1 - Q0).norm();
-        sylinderQ[0].gid = 1;
-        sylinderQ[0].globalIndex = 1;
-        sylinderQ[0].rank = 0;
-        sylinderQ[0].radiusCollision = length;
-        sylinderQ[0].lengthCollision = length;
-        sylinderQ[0].pos[0] = center[0];
-        sylinderQ[0].pos[1] = center[1];
-        sylinderQ[0].pos[2] = center[2];
-        sylinderQ[0].direction[0] = direction[0];
-        sylinderQ[0].direction[1] = direction[1];
-        sylinderQ[0].direction[2] = direction[2];
+        particleQ[0].gid = 1;
+        particleQ[0].globalIndex = 1;
+        particleQ[0].rank = 0;
+        particleQ[0].radiusCollision = length;
+        particleQ[0].lengthCollision = length;
+        particleQ[0].pos[0] = center[0];
+        particleQ[0].pos[1] = center[1];
+        particleQ[0].pos[2] = center[2];
+        particleQ[0].direction[0] = direction[0];
+        particleQ[0].direction[1] = direction[1];
+        particleQ[0].direction[2] = direction[2];
     }
     ForceNear fnear;
-    calc(sylinderP.data(), 1, sylinderQ.data(), 1, &fnear);
+    calc(particleP.data(), 1, particleQ.data(), 1, &fnear);
     printf("%zu collisions recorded\n", calc.conPoolPtr->front().size());
     auto stress = calc.conPoolPtr->front().front().stress;
     auto block = calc.conPoolPtr->front().front();
@@ -230,7 +230,7 @@ void testSphere() {
     // check correctness, stress = xf for spheres
     Emat3 stress1;
     block.getStress(stress1);
-    Evec3 rij = Emap3(sylinderQ[0].pos) - Emap3(sylinderP[0].pos);
+    Evec3 rij = Emap3(particleQ[0].pos) - Emap3(particleP[0].pos);
     Evec3 rijunit = rij.normalized();
     Emat3 stress2 = rij * rijunit.transpose();
     Emat3 error = (stress1 - stress2).cwiseAbs();
@@ -240,8 +240,8 @@ void testSphere() {
     }
 }
 
-void testSylinderSphere() {
-    // P is sylinder
+void testParticleSphere() {
+    // P is particle
     // Q is sphere
 
     omp_set_num_threads(1);
@@ -250,47 +250,47 @@ void testSylinderSphere() {
     Evec3 Q0(0, 0, 1);
     Evec3 Q1 = Q0 + Evec3(1, 0, 0);
 
-    CalcSylinderNearForce calc;
+    CalcParticleNearForce calc;
     calc.conPoolPtr = std::make_shared<ConstraintBlockPool>();
     calc.conPoolPtr->resize(1);
 
-    std::vector<SylinderNearEP> sylinderP(1);
-    std::vector<SylinderNearEP> sylinderQ(1);
+    std::vector<ParticleNearEP<1>> particleP(1);
+    std::vector<ParticleNearEP<1>> particleQ(1);
 
     { // setup P
         Evec3 center = (P0 + P1) / 2;
         Evec3 direction = (P1 - P0).normalized();
         double length = (P1 - P0).norm();
-        sylinderP[0].gid = 0;
-        sylinderP[0].globalIndex = 0;
-        sylinderP[0].rank = 0;
-        sylinderP[0].radiusCollision = length;
-        sylinderP[0].lengthCollision = length;
-        sylinderP[0].pos[0] = center[0];
-        sylinderP[0].pos[1] = center[1];
-        sylinderP[0].pos[2] = center[2];
-        sylinderP[0].direction[0] = direction[0];
-        sylinderP[0].direction[1] = direction[1];
-        sylinderP[0].direction[2] = direction[2];
+        particleP[0].gid = 0;
+        particleP[0].globalIndex = 0;
+        particleP[0].rank = 0;
+        particleP[0].radiusCollision = length;
+        particleP[0].lengthCollision = length;
+        particleP[0].pos[0] = center[0];
+        particleP[0].pos[1] = center[1];
+        particleP[0].pos[2] = center[2];
+        particleP[0].direction[0] = direction[0];
+        particleP[0].direction[1] = direction[1];
+        particleP[0].direction[2] = direction[2];
     }
     { // setup Q
         Evec3 center = (Q0 + Q1) / 2;
         Evec3 direction = (Q1 - Q0).normalized();
         double length = (Q1 - Q0).norm();
-        sylinderQ[0].gid = 1;
-        sylinderQ[0].globalIndex = 1;
-        sylinderQ[0].rank = 0;
-        sylinderQ[0].radiusCollision = 0.4 * length;
-        sylinderQ[0].lengthCollision = length;
-        sylinderQ[0].pos[0] = center[0];
-        sylinderQ[0].pos[1] = center[1];
-        sylinderQ[0].pos[2] = center[2];
-        sylinderQ[0].direction[0] = direction[0];
-        sylinderQ[0].direction[1] = direction[1];
-        sylinderQ[0].direction[2] = direction[2];
+        particleQ[0].gid = 1;
+        particleQ[0].globalIndex = 1;
+        particleQ[0].rank = 0;
+        particleQ[0].radiusCollision = 0.4 * length;
+        particleQ[0].lengthCollision = length;
+        particleQ[0].pos[0] = center[0];
+        particleQ[0].pos[1] = center[1];
+        particleQ[0].pos[2] = center[2];
+        particleQ[0].direction[0] = direction[0];
+        particleQ[0].direction[1] = direction[1];
+        particleQ[0].direction[2] = direction[2];
     }
     ForceNear fnear;
-    calc(sylinderP.data(), 1, sylinderQ.data(), 1, &fnear);
+    calc(particleP.data(), 1, particleQ.data(), 1, &fnear);
     printf("%zu collisions recorded\n", calc.conPoolPtr->front().size());
     auto stress = calc.conPoolPtr->front().front().stress;
     auto block = calc.conPoolPtr->front().front();
@@ -307,11 +307,11 @@ int main() {
     testEpsilon();
     printf("-------------testing error of a given pair\n");
     testFixedPair();
-    printf("---testing stability of parallel sylinders\n");
+    printf("---testing stability of parallel particles\n");
     testParallel();
-    printf("---------------------------------------------\ntesting short sylinders as spheres\n");
+    printf("---------------------------------------------\ntesting short particles as spheres\n");
     testSphere();
-    printf("---------------------------------------------\ntesting sylinder-sphere \n");
-    testSylinderSphere();
+    printf("---------------------------------------------\ntesting particle-sphere \n");
+    testParticleSphere();
     return 0;
 }

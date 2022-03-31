@@ -1,7 +1,7 @@
 /**
- * @file SylinderSystem.hpp
+ * @file ParticleSystem.hpp
  * @author wenyan4work (wenyan4work@gmail.com)
- * @brief System for sylinders
+ * @brief System for particles
  * @version 1.0
  * @date 2018-12-13
  *
@@ -11,9 +11,10 @@
 #ifndef SYLINDERSYSTEM_HPP_
 #define SYLINDERSYSTEM_HPP_
 
-#include "Sylinder.hpp"
-#include "SylinderConfig.hpp"
-#include "SylinderNear.hpp"
+#include "Particle.hpp"
+#include "ParticleConfig.hpp"
+#include "ParticleNear.hpp"
+#include "SharedParticleSurface.hpp"
 
 #include "Boundary/Boundary.hpp"
 #include "Constraint/ConstraintSolver.hpp"
@@ -25,10 +26,11 @@
 #include <unordered_map>
 
 /**
- * @brief A collection of sylinders distributed to multiple MPI ranks.
+ * @brief A collection of particles distributed to multiple MPI ranks.
  *
  */
-class SylinderSystem {
+template <int spectralDegree>
+class ParticleSystem {
     bool enableTimer = false;
     int snapID;                  ///< the current id of the snapshot file to be saved. sequentially numbered from 0
     int stepCount;               ///< timestep Count. sequentially numbered from 0
@@ -38,10 +40,11 @@ class SylinderSystem {
     PS::DomainInfo dinfo; ///< domain size, boundary condition, and decomposition info
     void setDomainInfo();
 
-    PS::ParticleSystem<Sylinder> sylinderContainer;        ///< sylinders
-    std::unique_ptr<TreeSylinderNear> treeSylinderNearPtr; ///< short range interaction of sylinders
-    int treeSylinderNumber;                                ///< the current max_glb number of treeSylinderNear
-    void setTreeSylinder();
+    PS::ParticleSystem<Particle> particleContainer;        ///< particles
+    SharedParticleSurface sharedPS;                     ///< shared particle surface (TODO: expand to support multiple particle types)
+    std::unique_ptr<TreeParticleNear> treeParticleNearPtr; ///< short range interaction of particles
+    int treeParticleNumber;                                ///< the current max_glb number of treeParticleNear
+    void setTreeParticle();
 
     std::unordered_multimap<int, int> linkMap;        ///< links prev,next
     std::unordered_multimap<int, int> linkReverseMap; ///< links next, prev
@@ -64,13 +67,13 @@ class SylinderSystem {
     // MPI stuff
     std::shared_ptr<TRngPool> rngPoolPtr;      ///< TRngPool object for thread-safe random number generation
     Teuchos::RCP<const TCOMM> commRcp;         ///< TCOMM, set as a Teuchos::MpiComm object in constrctor
-    Teuchos::RCP<TMAP> sylinderMapRcp;         ///< TMAP, contiguous and sequentially ordered 1 dof per sylinder
-    Teuchos::RCP<TMAP> sylinderMobilityMapRcp; ///< TMAP, contiguous and sequentially ordered 6 dofs per sylinder
+    Teuchos::RCP<TMAP> particleMapRcp;         ///< TMAP, contiguous and sequentially ordered 1 dof per particle
+    Teuchos::RCP<TMAP> particleMobilityMapRcp; ///< TMAP, contiguous and sequentially ordered 6 dofs per particle
     Teuchos::RCP<TCMAT> mobilityMatrixRcp;     ///< block-diagonal mobility matrix
     Teuchos::RCP<TOP> mobilityOperatorRcp;     ///< full mobility operator (matrix-free), to be implemented
 
     // Data directory
-    std::shared_ptr<ZDD<SylinderNearEP>> sylinderNearDataDirectoryPtr; ///< distributed data directory for sylinder data
+    std::shared_ptr<ZDD<ParticleNearEP>> particleNearDataDirectoryPtr; ///< distributed data directory for particle data
 
     // internal utility functions
     /**
@@ -106,7 +109,7 @@ class SylinderSystem {
     /**
      * @brief set initial configuration if runConfig.initCircularX is set
      *
-     * This function move the position of all sylinders into a cylindrical tube fit in initBox
+     * This function move the position of all particles into a cylindrical tube fit in initBox
      */
     void setInitialCircularCrossSection();
 
@@ -117,11 +120,11 @@ class SylinderSystem {
     void showOnScreenRank0();
 
     /**
-     * @brief update the sylinderMap and sylinderMobilityMap
+     * @brief update the particleMap and particleMobilityMap
      *
      * This function is called in prepareStep(), and no adding/removing/exchanging is allowed before runStep()
      */
-    void updateSylinderMap(); ///< update sylindermap and sylinderMobilityMap
+    void updateParticleMap(); ///< update particlemap and particleMobilityMap
 
     /**
      * @brief write VTK parallel XML file into baseFolder
@@ -164,68 +167,68 @@ class SylinderSystem {
     void getOrient(Equatn &orient, const double px, const double py, const double pz, const int threadId);
 
     /**
-     * @brief update the rank data field of sylinder
+     * @brief update the rank data field of particle
      *
      */
-    void updateSylinderRank();
+    void updateParticleRank();
 
   public:
-    SylinderConfig runConfig; ///< system configuration. Be careful if this is modified on the fly
+    ParticleConfig runConfig; ///< system configuration. Be careful if this is modified on the fly
 
     /**
-     * @brief Construct a new SylinderSystem object
+     * @brief Construct a new ParticleSystem object
      *
      * initialize() should be called after this constructor
      */
-    SylinderSystem() = default;
+    ParticleSystem() = default;
 
     /**
-     * @brief Construct a new SylinderSystem object
+     * @brief Construct a new ParticleSystem object
      *
      * This constructor calls initialize() internally
-     * @param configFile a yaml file for SylinderConfig
+     * @param configFile a yaml file for ParticleConfig
      * @param posFile initial configuration. use empty string ("") for no such file
      * @param argc command line argument
      * @param argv command line argument
      */
-    SylinderSystem(const std::string &configFile, const std::string &posFile, int argc, char **argv);
+    ParticleSystem(const std::string &configFile, const std::string &posFile, int argc, char **argv);
 
     /**
-     * @brief Construct a new SylinderSystem object
+     * @brief Construct a new ParticleSystem object
      *
      * This constructor calls initialize() internally
-     * @param config SylinderConfig object
+     * @param config ParticleConfig object
      * @param posFile initial configuration. use empty string ("") for no such file
      * @param argc command line argument
      * @param argv command line argument
      */
-    SylinderSystem(const SylinderConfig &config, const std::string &posFile, int argc, char **argv);
+    ParticleSystem(const ParticleConfig &config, const std::string &posFile, int argc, char **argv);
 
-    ~SylinderSystem() = default;
+    ~ParticleSystem() = default;
 
     // forbid copy
-    SylinderSystem(const SylinderSystem &) = delete;
-    SylinderSystem &operator=(const SylinderSystem &) = delete;
+    ParticleSystem(const ParticleSystem &) = delete;
+    ParticleSystem &operator=(const ParticleSystem &) = delete;
 
     /**
      * @brief initialize after an empty constructor
      *
-     * @param config SylinderConfig object
+     * @param config ParticleConfig object
      * @param posFile initial configuration. use empty string ("") for no such file
      * @param argc command line argument
      * @param argv command line argument
      */
-    void initialize(const SylinderConfig &config, const std::string &posFile, int argc, char **argv);
+    void initialize(const ParticleConfig &config, const std::string &posFile, int argc, char **argv);
 
     /**
      * @brief reinitialize from vtk files
      *
-     * @param config SylinderConfig object
+     * @param config ParticleConfig object
      * @param restartFile txt file containing timestep and most recent pvtp file names
      * @param argc command line argument
      * @param argv command line argument
      */
-    void reinitialize(const SylinderConfig &config, const std::string &restartFile, int argc, char **argv,
+    void reinitialize(const ParticleConfig &config, const std::string &restartFile, int argc, char **argv,
                       bool eulerStep = true);
 
     /**
@@ -236,7 +239,7 @@ class SylinderSystem {
     void setTimer(bool value) { enableTimer = value; }
 
     /**
-     * @brief compute axis-aligned bounding box of sylinders
+     * @brief compute axis-aligned bounding box of particles
      *
      * @param localLow
      * @param localHigh
@@ -246,7 +249,7 @@ class SylinderSystem {
     void calcBoundingBox(double localLow[3], double localHigh[3], double globalLow[3], double globalHigh[3]);
 
     /**
-     * @brief compute domain decomposition by sampling sylinder distribution
+     * @brief compute domain decomposition by sampling particle distribution
      *
      * domain decomposition must be triggered when particle distribution significantly changes
      */
@@ -257,19 +260,19 @@ class SylinderSystem {
      *
      * particle exchange must be triggered every timestep:
      */
-    void exchangeSylinder();
+    void exchangeParticle();
 
     /**
      * one-step high level API
      */
     // get information
     /**
-     * @brief Get sylinderContainer
+     * @brief Get particleContainer
      *
-     * @return PS::ParticleSystem<Sylinder>&
+     * @return PS::ParticleSystem<Particle>&
      */
-    const PS::ParticleSystem<Sylinder> &getContainer() { return sylinderContainer; }
-    PS::ParticleSystem<Sylinder> &getContainerNonConst() { return sylinderContainer; }
+    const PS::ParticleSystem<Particle> &getContainer() { return particleContainer; }
+    PS::ParticleSystem<Particle> &getContainerNonConst() { return particleContainer; }
 
     /**
      * @brief Get the DomainInfo object
@@ -301,11 +304,11 @@ class SylinderSystem {
      *
      * apply simBox boundary condition
      * decomposeDomain() for every 50 steps
-     * exchangeSylinder() at every step
+     * exchangeParticle() at every step
      * clear velocity
      * rebuild map
      * compute mobility matrix&operator
-     * between prepareStep() and runStep(), sylinders should not be moved, added, or removed
+     * between prepareStep() and runStep(), particles should not be moved, added, or removed
      */
     void prepareStep();
 
@@ -337,16 +340,16 @@ class SylinderSystem {
 
     // These should run after runStep()
     /**
-     * @brief add new Sylinders into the system from all ranks
+     * @brief add new Particles into the system from all ranks
      *
-     * add new sylinders
-     * 1. new gids will be randomly generated and assigned to each new sylinder
-     * 2. added new sylinders will be appended to the local rank
+     * add new particles
+     * 1. new gids will be randomly generated and assigned to each new particle
+     * 2. added new particles will be appended to the local rank
      *
-     * @param newSylinder list of new sylinders.
-     * @return the generated new gids of the added new sylinders
+     * @param newParticle list of new particles.
+     * @return the generated new gids of the added new particles
      */
-    std::vector<int> addNewSylinder(const std::vector<Sylinder> &newSylinder);
+    std::vector<int> addNewParticle(const std::vector<Particle> &newParticle);
 
     /**
      * @brief add new links into the system from all ranks
@@ -389,17 +392,24 @@ class SylinderSystem {
     /**
      * @brief calculate translational and rotational Brownian motion as specified in runConfig
      *
-     * write back to sylinder.velBrown/omegaBrown
+     * write back to particle.velBrown/omegaBrown
      */
     void calcVelocityBrown();
+
+    /**
+     * @brief calculate translational and rotational hydrodynamic motion as specified in runConfig
+     *
+     * write back to particle.velHydro/omegaHydro
+     */
+    void calcVelocityHydro();
 
     /**
      * @brief calculate known velocity before collision resolution
      *
      * velocityNonCon = velocityBrown + velocityNonBrown + mobility * forceNonBrown
      * velocityNonBrown sums both the values set by setVelocityNonBrown() and directly written to
-     * sylinder[i].velNonB/omegaNonB
-     * write back to sylinder.velNonB/omegaNonB
+     * particle[i].velNonB/omegaNonB
+     * write back to particle.velNonB/omegaNonB
      */
     void calcVelocityNonCon();
 
@@ -423,17 +433,17 @@ class SylinderSystem {
     void calcMobOperator();
 
     /**
-     * @brief build the ZDD<SylinderNearEP> object
+     * @brief build the ZDD<ParticleNearEP> object
      *
      */
-    void buildSylinderNearDataDirectory();
+    void buildParticleNearDataDirectory();
 
     /**
-     * @brief Get the SylinderNearDataDirectory object
+     * @brief Get the ParticleNearDataDirectory object
      *
-     * @return std::shared_ptr<const ZDD<SylinderNearEP>>&
+     * @return std::shared_ptr<const ZDD<ParticleNearEP>>&
      */
-    std::shared_ptr<ZDD<SylinderNearEP>> &getSylinderNearDataDirectory() { return sylinderNearDataDirectoryPtr; }
+    std::shared_ptr<ZDD<ParticleNearEP>> &getParticleNearDataDirectory() { return particleNearDataDirectoryPtr; }
 
     // resolve constraints
     void collectPairCollision();     ///< collect pair collision constraints
@@ -441,7 +451,7 @@ class SylinderSystem {
     void collectLinkBilateral();     ///< setup link constraints
 
     void resolveConstraints();           ///< resolve constraints
-    void saveForceVelocityConstraints(); ///< write back to sylinder.velCol and velBi
+    void saveForceVelocityConstraints(); ///< write back to particle.velCol and velBi
 
     void stepEuler(); ///< Euler step update position and orientation, with both collision and non-collision velocity
 
@@ -473,7 +483,7 @@ class SylinderSystem {
 
     // get information
     /**
-     * @brief Get the local and global max gid for sylinders
+     * @brief Get the local and global max gid for particles
      *
      * @return std::pair<int, int> [localMaxGid,globalMaxGid]
      */
@@ -487,4 +497,6 @@ class SylinderSystem {
     void printTimingSummary(const bool zeroOut = true);
 };
 
+// Include the ParticleSystem implimentation
+#include "ParticleSystem.tpp"
 #endif

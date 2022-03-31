@@ -1,9 +1,9 @@
-#include "SylinderConfig.hpp"
+#include "Particle/ParticleConfig.hpp"
 
 #include "Util/Logger.hpp"
 #include "Util/YamlHelper.hpp"
 
-SylinderConfig::SylinderConfig(std::string filename) {
+ParticleConfig::ParticleConfig(std::string filename) {
 
     YAML::Node config = YAML::LoadFile(filename);
 
@@ -16,9 +16,12 @@ SylinderConfig::SylinderConfig(std::string filename) {
     readConfig(config, VARNAME(viscosity), viscosity, "");
     readConfig(config, VARNAME(KBT), KBT, "");
 
-    readConfig(config, VARNAME(sylinderNumber), sylinderNumber, "");
-    readConfig(config, VARNAME(sylinderLength), sylinderLength, "");
-    readConfig(config, VARNAME(sylinderDiameter), sylinderDiameter, "");
+    readConfig(config, VARNAME(particleNumber), particleNumber, "");
+    readConfig(config, VARNAME(particleLength), particleLength, "");
+    readConfig(config, VARNAME(particleDiameter), particleDiameter, "");
+
+    readConfig(config, VARNAME(externalForce), externalForce, 3, "");
+    readConfig(config, VARNAME(externalTorque), externalTorque, 3, "");
 
     readConfig(config, VARNAME(dt), dt, "");
     readConfig(config, VARNAME(timeTotal), timeTotal, "");
@@ -43,7 +46,7 @@ SylinderConfig::SylinderConfig(std::string filename) {
     readConfig(config, VARNAME(initBoxLow), initBoxLow, 3, "", true);
     readConfig(config, VARNAME(initBoxHigh), initBoxHigh, 3, "", true);
 
-    initOrient[0] = initOrient[1] = initOrient[2] = 2;
+    initOrient[0] = initOrient[1] = initOrient[2] = 0.0;
     readConfig(config, VARNAME(initOrient), initOrient, 3, "", true);
 
     initCircularX = false;
@@ -57,16 +60,38 @@ SylinderConfig::SylinderConfig(std::string filename) {
     readConfig(config, VARNAME(linkKappa), linkKappa, "", true);
     readConfig(config, VARNAME(linkGap), linkGap, "", true);
 
-    sylinderFixed = false;
-    readConfig(config, VARNAME(sylinderFixed), sylinderFixed, "", true);
-    sylinderLengthSigma = -1;
-    readConfig(config, VARNAME(sylinderLengthSigma), sylinderLengthSigma, "", true);
-    sylinderDiameterColRatio = 1.0;
-    readConfig(config, VARNAME(sylinderDiameterColRatio), sylinderDiameterColRatio, "", true);
-    sylinderLengthColRatio = 1.0;
-    readConfig(config, VARNAME(sylinderLengthColRatio), sylinderLengthColRatio, "", true);
-    sylinderColBuf = 0.3;
-    readConfig(config, VARNAME(sylinderColBuf), sylinderColBuf, "", true);
+    linkKappa = 100;
+    linkGap = 0.01;
+    readConfig(config, VARNAME(linkKappa), linkKappa, "", true);
+    readConfig(config, VARNAME(linkGap), linkGap, "", true);
+
+    particleFixed = false;
+    readConfig(config, VARNAME(particleFixed), particleFixed, "", true);
+    particleLengthSigma = -1;
+    readConfig(config, VARNAME(particleLengthSigma), particleLengthSigma, "", true);
+    particleDiameterColRatio = 1.0;
+    readConfig(config, VARNAME(particleDiameterColRatio), particleDiameterColRatio, "", true);
+    particleLengthColRatio = 1.0;
+    readConfig(config, VARNAME(particleLengthColRatio), particleLengthColRatio, "", true);
+    particleColBuf = 0.3;
+    readConfig(config, VARNAME(particleColBuf), particleColBuf, "", true);
+
+    prescribedSurfaceDensityFile = "";
+    readConfig(config, VARNAME(prescribedSurfaceDensityFile), prescribedSurfaceDensityFile, "", true);
+
+    particleShapesPtr.clear();
+    if (config["particleShape"]) {
+        YAML::Node particleShapeNode = config["particleShape"];
+        std::string name = particleShapeNode["type"].as<std::string>();
+        spdlog::debug(name);
+        if (name == "sphere") {
+            particleShapesPtr = std::make_shared<const Sphere>(particleShapeNode);
+        } else if (name == "spheroid") {
+            particleShapesPtr = std::make_shared<const Spheroid>(particleShapeNode);
+        } else if (name == "helix") {
+            particleShapesPtr = std::make_shared<const Helix>(particleShapeNode);
+        }
+    }
 
     boundaryPtr.clear();
     if (config["boundaries"]) {
@@ -85,7 +110,7 @@ SylinderConfig::SylinderConfig(std::string filename) {
     }
 }
 
-void SylinderConfig::dump() const {
+void ParticleConfig::dump() const {
     {
         printf("-------------------------------------------\n");
         printf("Run Setting: \n");
@@ -107,7 +132,7 @@ void SylinderConfig::dump() const {
     }
     {
         printf("-------------------------------------------\n");
-        printf("For drag and collision: Sylinders with length < diameter are treated as spheres\n");
+        printf("For drag and collision: Particles with length < diameter are treated as spheres\n");
         printf("-------------------------------------------\n");
     }
     {
@@ -116,13 +141,13 @@ void SylinderConfig::dump() const {
         printf("kBT: %g\n", KBT);
         printf("Link Kappa: %g\n", linkKappa);
         printf("Link Gap: %g\n", linkGap);
-        printf("Sylinder Number: %d\n", sylinderNumber);
-        printf("Sylinder Length: %g\n", sylinderLength);
-        printf("Sylinder Length Sigma: %g\n", sylinderLengthSigma);
-        printf("Sylinder Diameter: %g\n", sylinderDiameter);
-        printf("Sylinder Length Collision Ratio: %g\n", sylinderLengthColRatio);
-        printf("Sylinder Diameter Collision Ratio: %g\n", sylinderDiameterColRatio);
-        printf("Sylinder Collision Buffer: %g\n", sylinderColBuf);
+        printf("Particle Number: %d\n", particleNumber);
+        printf("Particle Length: %g\n", particleLength);
+        printf("Particle Length Sigma: %g\n", particleLengthSigma);
+        printf("Particle Diameter: %g\n", particleDiameter);
+        printf("Particle Length Collision Ratio: %g\n", particleLengthColRatio);
+        printf("Particle Diameter Collision Ratio: %g\n", particleDiameterColRatio);
+        printf("Particle Collision Buffer: %g\n", particleColBuf);
         printf("-------------------------------------------\n");
         printf("Constraint Solver Setting:\n");
         printf("Residual Tolerance: %g\n", conResTol);

@@ -1,5 +1,5 @@
 /**
- * @file Sylinder.hpp
+ * @file Particle.hpp
  * @author wenyan4work (wenyan4work@gmail.com)
  * @brief Sphero-cylinder type
  * @version 1.0
@@ -23,7 +23,7 @@
 #include <vector>
 
 /**
- * @brief specify the link of sylinders
+ * @brief specify the link of particles
  *
  */
 struct Link {
@@ -32,17 +32,18 @@ struct Link {
 };
 
 /**
- * @brief Sphero-cylinder class
+ * @brief Particle class
  *
  */
-class Sylinder {
+template <int maxSpectralDegree>
+class Particle {
   public:
     int gid = GEO_INVALID_INDEX;         ///< unique global id
     int globalIndex = GEO_INVALID_INDEX; ///< unique global index sequentially ordered
     int rank = -1;                       ///< mpi rank
     int group = -1;                      ///< a 'marker'
 
-    bool isImmovable = false; ///< flag for if Sylinder can move
+    bool isImmovable = false; ///< flag for if Particle can move
 
     double radius;          ///< radius
     double radiusCollision; ///< radius for collision resolution
@@ -60,14 +61,16 @@ class Sylinder {
     // there is no Brownian force
 
     // velocity
-    double vel[3];       ///< velocity = velCol+velBi+velNonB+velBrown
-    double omega[3];     ///< angular velocity = omegaCol+omegaBi+omegaNonB+velBrown
+    double vel[3];       ///< velocity = velCol+velBi+velNonB+velBrown+velHydro
+    double omega[3];     ///< angular velocity = omegaCol+omegaBi+omegaNonB+velBrown+omegaHydro
     double velCol[3];    ///< collision velocity
     double omegaCol[3];  ///< collision angular velocity
     double velBi[3];     ///< bilateral constraint velocity
     double omegaBi[3];   ///< bilateral constraint angular velocity
     double velNonB[3];   ///< all non-Brownian deterministic velocity before constraint resolution
     double omegaNonB[3]; ///< all non-Brownian deterministic angular velocity before constraint resolution
+    double velHydro[3];   ///< hydrodynamic velocity
+    double omegaHydro[3]; ///< hydrodynamic angular velocity
 
     // force
     double force[3];      ///< force = forceCol+forceBi+forceNonB
@@ -83,61 +86,58 @@ class Sylinder {
     double velBrown[3];   ///< Brownian velocity
     double omegaBrown[3]; ///< Brownian angular velocity
 
-    /**
-     * @brief Construct a new Sylinder object
-     *
-     */
-    Sylinder() = default;
+    // Spectral particle surface discretizations
+    //  These classes must be stored explicitly, NOT as pointers. 
+    //  This ensures they are communicated correctly.
+    //  They must also be trivially copyable
+    ParticleSurface<maxSpectralDegree> surface; ///< descretized surface grid 
 
     /**
-     * @brief Destroy the Sylinder object
+     * @brief Construct a new Particle object
      *
      */
-    ~Sylinder() = default;
+    Particle() = default;
 
     /**
-     * @brief Construct a new Sylinder object
+     * @brief Destroy the Particle object
      *
-     * @param gid_
-     * @param radius_
-     * @param radiusCollision_
-     * @param length_
-     * @param lengthCollision_
-     * @param pos_ if not specified position is set as [0,0,0]
-     * @param orientation_ if not specied orientation is set as identity
      */
-    Sylinder(const int &gid_, const double &radius_, const double &radiusCollision_, const double &length_,
-             const double &lengthCollision_, const double pos_[3] = nullptr, const double orientation_[4] = nullptr);
+    ~Particle() = default;
+
+    /**
+     * @brief Construct a new Particle object
+     *
+     * @param gid
+     * @param radius
+     * @param radiusCollision
+     * @param length
+     * @param lengthCollision
+     * @param pos if not specified position is set as [0,0,0]
+     * @param orientation if not specied orientation is set as identity
+     */
+    Particle(const int &gid, const double &radius, const double &radiusCollision, const double &length,
+             const double &lengthCollision, const double pos[3] = nullptr, const double orientation[4] = nullptr);
 
     /**
      * @brief Copy constructor
      *
      */
-    Sylinder(const Sylinder &) = default;
-    Sylinder(Sylinder &&) = default;
-    Sylinder &operator=(const Sylinder &) = default;
-    Sylinder &operator=(Sylinder &&) = default;
+    Particle(const Particle &) = default;
+    Particle(Particle &&) = default;
+    Particle &operator=(const Particle &) = default;
+    Particle &operator=(Particle &&) = default;
 
     /**
-     * @brief display the data fields for this sylinder
+     * @brief display the data fields for this particle
      *
      */
-    void dumpSylinder() const;
+    void dumpParticle() const;
 
     /**
      * @brief set the velocity data fields to zero
      *
      */
     void clear();
-
-    /**
-     * @brief return if this sylinder is treated as a sphere
-     *
-     * @param collision
-     * @return true
-     * @return false
-     */
-    bool isSphere(bool collision = false) const;
 
     /**
      * @brief calculate the three drag coefficient
@@ -255,86 +255,86 @@ class Sylinder {
         cellDataFields.emplace_back(3, IOHelper::IOTYPE::Float32, "znorm");
 
         for (int i = 0; i < nProcs; i++) {
-            pieceNames.emplace_back(std::string("Sylinder_") + std::string("r") + std::to_string(i) + "_" + postfix +
+            pieceNames.emplace_back(std::string("Particle_") + std::string("r") + std::to_string(i) + "_" + postfix +
                                     ".vtp");
         }
 
-        IOHelper::writePVTPFile(prefix + "Sylinder_" + postfix + ".pvtp", pointDataFields, cellDataFields, pieceNames);
+        IOHelper::writePVTPFile(prefix + "Particle_" + postfix + ".pvtp", pointDataFields, cellDataFields, pieceNames);
     }
 
     /**
      * @brief write VTK XML binary base64 VTP data file from every MPI rank
      *
-     * Procedure for dumping sylinders in the system:
-     * Each sylinder writes a polyline with two (connected) points.
+     * Procedure for dumping particles in the system:
+     * Each particle writes a polyline with two (connected) points.
      * Points are labeled with float -1 and 1
-     * Sylinder data fields are written as cell data
+     * Particle data fields are written as cell data
      * Rank 0 writes the parallel header , then each rank write its own serial vtp/vtu file
      *
-     * @tparam Container container for local sylinders which supports [] operator
-     * @param sylinder
-     * @param sylinderNumber
+     * @tparam Container container for local particles which supports [] operator
+     * @param particle
+     * @param particleNumber
      * @param prefix
      * @param postfix
      * @param rank
      */
     template <class Container>
-    static void writeVTP(const Container &sylinder, const int sylinderNumber, const std::string &prefix,
+    static void writeVTP(const Container &particle, const int particleNumber, const std::string &prefix,
                          const std::string &postfix, int rank) {
-        // for each sylinder:
+        // for each particle:
 
         // write VTP for basic data
         // use float to save some space
         // point and point data
-        std::vector<double> pos(6 * sylinderNumber); // position always in Float64
-        std::vector<uint8_t> label(2 * sylinderNumber);
+        std::vector<double> pos(6 * particleNumber); // position always in Float64
+        std::vector<uint8_t> label(2 * particleNumber);
 
         // point connectivity of line
-        std::vector<int32_t> connectivity(2 * sylinderNumber);
-        std::vector<int32_t> offset(sylinderNumber);
+        std::vector<int32_t> connectivity(2 * particleNumber);
+        std::vector<int32_t> offset(particleNumber);
 
         // immovable?
 
-        // sylinder data
-        std::vector<int32_t> gid(sylinderNumber);
-        std::vector<int32_t> group(sylinderNumber);
-        std::vector<uint8_t> isImmovable(sylinderNumber);
-        std::vector<float> radius(sylinderNumber);
-        std::vector<float> radiusCollision(sylinderNumber);
-        std::vector<float> length(sylinderNumber);
-        std::vector<float> lengthCollision(sylinderNumber);
+        // particle data
+        std::vector<int32_t> gid(particleNumber);
+        std::vector<int32_t> group(particleNumber);
+        std::vector<uint8_t> isImmovable(particleNumber);
+        std::vector<float> radius(particleNumber);
+        std::vector<float> radiusCollision(particleNumber);
+        std::vector<float> length(particleNumber);
+        std::vector<float> lengthCollision(particleNumber);
 
         // vel
-        std::vector<float> vel(3 * sylinderNumber);
-        std::vector<float> omega(3 * sylinderNumber);
-        std::vector<float> velCol(3 * sylinderNumber);
-        std::vector<float> omegaCol(3 * sylinderNumber);
-        std::vector<float> velBi(3 * sylinderNumber);
-        std::vector<float> omegaBi(3 * sylinderNumber);
-        std::vector<float> velNonB(3 * sylinderNumber);
-        std::vector<float> omegaNonB(3 * sylinderNumber);
+        std::vector<float> vel(3 * particleNumber);
+        std::vector<float> omega(3 * particleNumber);
+        std::vector<float> velCol(3 * particleNumber);
+        std::vector<float> omegaCol(3 * particleNumber);
+        std::vector<float> velBi(3 * particleNumber);
+        std::vector<float> omegaBi(3 * particleNumber);
+        std::vector<float> velNonB(3 * particleNumber);
+        std::vector<float> omegaNonB(3 * particleNumber);
 
         // force
-        std::vector<float> force(3 * sylinderNumber);
-        std::vector<float> torque(3 * sylinderNumber);
-        std::vector<float> forceCol(3 * sylinderNumber);
-        std::vector<float> torqueCol(3 * sylinderNumber);
-        std::vector<float> forceBi(3 * sylinderNumber);
-        std::vector<float> torqueBi(3 * sylinderNumber);
-        std::vector<float> forceNonB(3 * sylinderNumber);
-        std::vector<float> torqueNonB(3 * sylinderNumber);
+        std::vector<float> force(3 * particleNumber);
+        std::vector<float> torque(3 * particleNumber);
+        std::vector<float> forceCol(3 * particleNumber);
+        std::vector<float> torqueCol(3 * particleNumber);
+        std::vector<float> forceBi(3 * particleNumber);
+        std::vector<float> torqueBi(3 * particleNumber);
+        std::vector<float> forceNonB(3 * particleNumber);
+        std::vector<float> torqueNonB(3 * particleNumber);
 
         // Brownian motion
-        std::vector<float> velBrown(3 * sylinderNumber);
-        std::vector<float> omegaBrown(3 * sylinderNumber);
+        std::vector<float> velBrown(3 * particleNumber);
+        std::vector<float> omegaBrown(3 * particleNumber);
 
         // rigid body orientation
-        std::vector<float> xnorm(3 * sylinderNumber);
-        std::vector<float> znorm(3 * sylinderNumber);
+        std::vector<float> xnorm(3 * particleNumber);
+        std::vector<float> znorm(3 * particleNumber);
 
 #pragma omp parallel for
-        for (int i = 0; i < sylinderNumber; i++) {
-            const auto &sy = sylinder[i];
+        for (int i = 0; i < particleNumber; i++) {
+            const auto &sy = particle[i];
             // point and point data
             Evec3 direction = ECmapq(sy.orientation) * Evec3(0, 0, 1);
             Evec3 end0 = ECmap3(sy.pos) - direction * (sy.length * 0.5);
@@ -353,7 +353,7 @@ class Sylinder {
             connectivity[2 * i + 1] = 2 * i + 1; // index of point 1 in line
             offset[i] = 2 * i + 2;               // offset is the end of each line. in fortran indexing
 
-            // sylinder data
+            // particle data
             gid[i] = sy.gid;
             group[i] = sy.group;
             isImmovable[i] = sy.isImmovable ? 1 : 0;
@@ -392,13 +392,13 @@ class Sylinder {
             }
         }
 
-        std::ofstream file(prefix + std::string("Sylinder_") + "r" + std::to_string(rank) + std::string("_") + postfix +
+        std::ofstream file(prefix + std::string("Particle_") + "r" + std::to_string(rank) + std::string("_") + postfix +
                                std::string(".vtp"),
                            std::ios::out);
 
         IOHelper::writeHeadVTP(file);
 
-        file << "<Piece NumberOfPoints=\"" << sylinderNumber * 2 << "\" NumberOfLines=\"" << sylinderNumber << "\">\n";
+        file << "<Piece NumberOfPoints=\"" << particleNumber * 2 << "\" NumberOfLines=\"" << particleNumber << "\">\n";
         // Points
         file << "<Points>\n";
         IOHelper::writeDataArrayBase64(pos, "position", 3, file);
@@ -456,14 +456,17 @@ class Sylinder {
 /**
  * @brief FDPS writeAscii file header
  */
-class SylinderAsciiHeader {
+class ParticleAsciiHeader {
   public:
     int nparticle;
     double time;
     void writeAscii(FILE *fp) const { fprintf(fp, "%d \n %lf\n", nparticle, time); }
 };
 
-static_assert(std::is_trivially_copyable<Sylinder>::value, "");
-static_assert(std::is_default_constructible<Sylinder>::value, "");
+static_assert(std::is_trivially_copyable<Particle>::value, "");
+static_assert(std::is_default_constructible<Particle>::value, "");
+
+// Include the Particle implimentation
+#include "Particle.tpp"
 
 #endif

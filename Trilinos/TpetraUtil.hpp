@@ -12,6 +12,9 @@
 #ifndef TPETRAUTIL_HPP_
 #define TPETRAUTIL_HPP_
 
+// standard library
+#include <complex>
+
 // Teuchos utility
 #include <Teuchos_ArrayViewDecl.hpp>
 #include <Teuchos_GlobalMPISession.hpp>
@@ -48,6 +51,7 @@ using TOP = Tpetra::Operator<double, int, int>;    ///< default Tpetra::Operator
 using TCMAT = Tpetra::CrsMatrix<double, int, int>; ///< default Tpetra::CrsMatrix type
 using TMV = Tpetra::MultiVector<double, int, int>; ///< default Tpetra::MultiVector type
 using TV = Tpetra::Vector<double, int, int>;       ///< default to Tpetra::Vector type
+using TVcd = Tpetra::Vector<std::complex<double>, int, int>;       ///< default to Tpetra::Vector type
 
 /**
  * @brief inserting a specialization for Tpetra objects into Belos namespace
